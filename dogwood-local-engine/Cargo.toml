@@ -1,0 +1,164 @@
+[package]
+name = "dogwood-local-engine"
+version = "0.1.0"
+edition = "2024"
+publish.workspace = true
+description = "A single-machine, event-sourced temporal engine for Dogwood: an incremental monitor over a durable local event log, implementing `dogwood_language::TemporalEngine`. The no-AWS counterpart to the DSQL/Aurora backend."
+exclude = ["/build", "/Config", "/build-tools/"]
+
+[lib]
+name = "dogwood_local_engine"
+
+[features]
+default = []
+# Compiles the hidden deterministic crash-test controller and hook calls.
+fault-injection = []
+# Replaces selected synchronization primitives with Shuttle-aware equivalents
+# in concurrency tests. Never enabled by the default or production build.
+# All-feature check/lint builds are supported, but ordinary tests must not be
+# executed with this feature because Shuttle primitives require a Runner.
+shuttle = ["fault-injection", "dep:shuttle"]
+
+[dependencies]
+# The Dogwood frontend: the `TemporalEngine` seam this crate implements, plus
+# the temporal-condition AST (`temporal_ast`) the incremental evaluator walks.
+# An intra-workspace `path` dep, but this crate is published, so it also needs a
+# `version`: Cargo builds against the path locally and records the version in
+# the published manifest (cross-package consumers use `dogwood-language =
+# "0.1"` the same way).
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0" }
+# The durable event log: a pure-Rust ACID embedded key–value store (no C
+# toolchain, clean cross-compile) — the storage substrate decided in DESIGN.md
+# §6.1. Used only as an append-only log + snapshot store, never as a query
+# engine.
+redb = "4.1.0"
+# Persisted-format derives: the installed policy bundle, the snapshot payload,
+# and (until the audit log is removed) the audit entry. Same version/features the
+# server already used, so nothing new enters the version set.
+serde = { version = "1", features = ["derive"] }
+# The built-in `JsonEventCodec`'s record format: the event's wire JSON plus the
+# store-assigned timestamp (`DESIGN.md` §6.1). Ships as the default codec so a
+# caller can open a `DurableTemporalEngine` without supplying one.
+serde_json = "1"
+thiserror = "1"
+# OS entropy for minting opaque policy handles (`PolicyToken`): a random,
+# non-sequential external id so callers cannot couple to the internal ordinal
+# Uses operating-system entropy to avoid predictable handles.
+getrandom = "0.3"
+# Deterministic concurrency scheduler used only when the `shuttle` test feature
+# is explicitly enabled.
+shuttle = { version = "0.9.3", optional = true }
+
+[dev-dependencies]
+# Differential testing against the interpreter oracle runs over the embedded
+# regression corpus (feature `corpus` on the frontend).
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0", features = ["corpus"] }
+
+# The corpus differential: LocalTemporalEngine must agree with the in-memory
+# interpreter oracle on every passing case. The referee for the incremental
+# rewrite (DESIGN.md §5).
+[[test]]
+name = "corpus_diff"
+path = "tests/corpus_diff.rs"
+
+
+# Proves the incremental non-correlated-`formerly` path is actually built
+# (incremental_leaf_count >= 1) and agrees with the in-memory oracle.
+[[test]]
+name = "incremental_formerly"
+path = "tests/incremental_formerly.rs"
+
+# Content-derived leaf identity: the keying that lets a policy change preserve
+# unchanged rules' accumulated windows while new rules start prospectively
+# (DESIGN.md §9.1). Driven from real parsed policies, since a `Condition` cannot
+# be hand-built out of crate.
+[[test]]
+name = "leaf_state_sharing"
+path = "tests/leaf_state_sharing.rs"
+
+[[test]]
+name = "leaf_identity"
+path = "tests/leaf_identity.rs"
+
+# What `DurableTemporalEngine::submit` promises: every acceptance reports its
+# position (decisions included), the reported timestamp is the one stored, and
+# the clock survives an emptying checkpoint. Drives the engine directly, no
+# socket — the sequencer's contract is the engine's, not the server's.
+[[test]]
+name = "submit_contract"
+path = "tests/submit_contract.rs"
+
+# The injected `Clock` and the monotonic clamp it feeds: a hand-driven clock that
+# can be stepped BACKWARDS proves `max(now, last + 1)` keeps the assigned sequence
+# strictly increasing — the property submit_contract cannot reach with no seam to
+# inject a clock.
+[[test]]
+name = "clock"
+path = "tests/clock.rs"
+
+# The store's log-shape/durability invariants (via the shared `tests/common`
+# harness) detect their own violations, and a real crash-and-recover cycle over
+# `DurableTemporalEngine` satisfies all of them.
+[[test]]
+name = "store_invariants"
+path = "tests/store_invariants.rs"
+
+# The behavioural half of recovery: a crash-and-recover cycle's verdicts compared
+# against the frontend's reference interpreter — the bug class no structural
+# invariant can see (a snapshot restored into the wrong formulas). Drives
+# `DurableTemporalEngine` directly.
+[[test]]
+name = "recovery_oracle"
+path = "tests/recovery_oracle.rs"
+
+# A persisted decision event keeps its semantic meaning across a crash image,
+# including transitive membership carried by auxiliary entities.
+[[test]]
+name = "auxiliary_entity_recovery"
+path = "tests/auxiliary_entity_recovery.rs"
+
+# Native pin partitioning: per-pin shards materialize, survive recovery (snapshot
+# and replay), and carry across a policy apply's keyed-state transplant. Verdict-
+# equivalent to global mode by the relativization theorem, so this pins the
+# observable — live shard count — instead.
+[[test]]
+name = "partitioned_mode"
+path = "tests/partitioned_mode.rs"
+
+# Verdict slicing behavior and conservative fallbacks.
+[[test]]
+name = "leaf_map_slicing"
+path = "tests/leaf_map_slicing.rs"
+
+# Corpus differential between sliced and unsliced evaluation.
+[[test]]
+name = "leaf_map_corpus_diff"
+path = "tests/leaf_map_corpus_diff.rs"
+
+# Scope-mutation corpus differential: every corpus case's `action ==` scope is
+# rewritten into four semantically equivalent expanded shapes (singleton list,
+# group, nested group, mixed list) and replayed through the full engine stack,
+# where the committed verdicts must not move. Covers the engine's consuming half
+# of slicing — the map rebuild at `prepare`, the `needed_for` probe, the
+# `Plan::All`/`Plan::Only` split — which the frontend's own sweep cannot reach.
+[[test]]
+name = "mutated_scope_corpus_diff"
+path = "tests/mutated_scope_corpus_diff.rs"
+
+# Ignored per-decision performance breakdown.
+[[test]]
+name = "component_breakdown"
+path = "tests/component_breakdown.rs"
+
+# Recovery replays policy CHANGES, not just events: a recorded `Apply` is
+# re-performed at its position through the same content-matched transplant a live
+# apply uses (§9.1), and an undecodable record fails recovery loudly.
+[[test]]
+name = "replay_control_records"
+path = "tests/replay_control_records.rs"
+
+# Many callers submitting at once: nothing lost or duplicated, and the recovered
+# store agrees with the reference oracle.
+[[test]]
+name = "concurrent_stress"
+path = "tests/concurrent_stress.rs"

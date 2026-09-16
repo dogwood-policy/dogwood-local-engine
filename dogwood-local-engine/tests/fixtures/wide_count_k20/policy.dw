@@ -1,0 +1,8 @@
+permit (
+    principal,
+    action == Action::"Guard",
+    resource
+)
+when temporal {
+    exists (cp_n: Long). (count for (cp_t: Timepoint). where formerly within 1000s (Action::"Counter"::request{ input.amt: 7 } && tp(cp_t))) == cp_n && cp_n >= 20
+};

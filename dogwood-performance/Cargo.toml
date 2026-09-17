@@ -1,0 +1,94 @@
+[package]
+name = "dogwood-performance"
+version = "0.1.0"
+edition = "2024"
+# A benchmark harness, not a shipped artifact: nothing consumes it as a library
+# and it exists to produce measurements, so it is not published.
+publish = false
+description = "Performance comparison harness for Dogwood engines: workload generation, a uniform measurement driver, and benchmarks comparing the in-memory reference implementation against the durable server across policy count, pinning, and concurrent request rates."
+exclude = ["/build", "/Config", "/build-tools/"]
+
+[lib]
+name = "dogwood_performance"
+path = "src/lib.rs"
+
+[dependencies]
+# The frontend: the reference (in-memory) engine and the lowering pipeline both
+# benchmarks drive.
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0" }
+# The single-machine engine, for measuring the durable path directly.
+dogwood-local-engine = { path = "../dogwood-local-engine" }
+# The server: benchmarked in-process (`DurableTemporalEngine`) and over its socket.
+dogwood-server = { path = "../dogwood-server" }
+serde_json = "1"
+
+[dev-dependencies]
+# Statistical benchmark driver. Used for the *sequential* per-decision latency
+# benchmarks, where its resampling and outlier detection earn their keep.
+#
+# The concurrency benchmarks deliberately do NOT use criterion: it measures
+# throughput of a closure it controls, whereas an open-loop load test has to hold
+# an offered rate and report the resulting latency distribution — including the
+# queueing that appears once the offered rate exceeds service capacity. Criterion
+# has no notion of an offered rate, so those live in a separate binary (`src/bin`)
+# that drives real concurrent clients.
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+
+# Sequential per-decision latency: reference vs. server, across policy count and
+# pinning. One decision per iteration, so the reported time is per-decision.
+[[bench]]
+name = "decide_latency"
+path = "benches/decide_latency.rs"
+harness = false
+
+# Policy-set installation: lowering + validation + monitor preparation, which is
+# where policy COUNT dominates and which a decision benchmark never sees.
+[[bench]]
+name = "install_policies"
+path = "benches/install_policies.rs"
+harness = false
+
+# Does pinning help? Sweeps balanced session count against predicate shape — the
+# experiment that shows a session pin is worth up to 2.8x on a broad predicate and
+# nothing (slightly negative) on a selective one.
+[[bench]]
+name = "pinning_sessions"
+path = "benches/pinning_sessions.rs"
+harness = false
+
+# Aggregate-over-`formerly` per-decision latency, driven through the LOCAL ENGINE
+# directly (no fsync, no reference), swept over history depth — isolating the
+# aggregate fold's cost, which the durable decide bench buries under storage.
+[[bench]]
+name = "aggregate_decide"
+path = "benches/aggregate_decide.rs"
+harness = false
+
+# Snapshot (checkpoint) latency swept over events-since-last-checkpoint, with the
+# injected clock separating capture (state serialize) from prune (log reclaim).
+[[bench]]
+name = "snapshot_latency"
+path = "benches/snapshot_latency.rs"
+harness = false
+
+# Snapshot recovery latency with construction excluded from timing. Sweeps
+# global and partitioned monitor state through 65,536 retained records.
+[[bench]]
+name = "snapshot_restore"
+path = "benches/snapshot_restore.rs"
+harness = false
+
+# Durable-record JSON encode/decode cost. Compares the original serde-derived
+# implementation with the explicit implementation used by the Verus proof.
+[[bench]]
+name = "record_codec"
+path = "benches/record_codec.rs"
+harness = false
+
+# Allocation companion to `record_codec`, kept in a separate process so its
+# counting allocator cannot perturb latency measurements.
+[[bench]]
+name = "record_codec_allocations"
+path = "benches/record_codec_allocations.rs"
+harness = false

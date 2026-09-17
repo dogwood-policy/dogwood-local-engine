@@ -1,0 +1,68 @@
+[package]
+name = "dogwood-server"
+version = "0.1.0"
+edition = "2024"
+# A binary crate: it produces the `dogwood-server` executable (the server and
+# its control-plane subcommands), not a library artifact other packages consume.
+publish = false
+description = "The Dogwood server (`dogwood-server`): a local service that owns the policy set and durable event log behind a process boundary, exposing a submit wire API over a Unix socket plus a privileged control plane. Builds on `dogwood-local-engine`."
+exclude = ["/build", "/Config", "/build-tools/"]
+
+# A library plus a thin binary over it. The library is what the integration
+# tests drive (an integration test cannot link a bin target), and it is also the
+# right seam for a consumer that wants to run the server inside its own process
+# rather than as a separate command.
+[lib]
+name = "dogwood_server"
+path = "src/lib.rs"
+
+# The server executable. A single default bin at src/main.rs would take the
+# crate name (`dogwood-server`); rename it to `dogwood-server`.
+[[bin]]
+name = "dogwood-server"
+path = "src/main.rs"
+
+[dependencies]
+# The single-machine engine this server wraps behind a process boundary.
+dogwood-local-engine = { path = "../dogwood-local-engine" }
+# The frontend, for the policy/schema types the control plane installs and the
+# event types the wire API exchanges.
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0" }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Unix peer-credential attestation (`SO_PEERCRED`) plus `getuid` — the kernel
+# half of the trust boundary (DESIGN.md §7.2, §8.1). A thin, pure-Rust syscall
+# wrapper, already in the dependency graph via `clap`'s `terminal_size`.
+rustix = { version = "1", features = ["net", "process"] }
+
+# The wire protocol's framing / round-trip properties, checked without a socket.
+[[test]]
+name = "apply_crash_safety"
+path = "tests/apply_crash_safety.rs"
+
+[[test]]
+name = "protocol"
+path = "tests/protocol.rs"
+
+# End-to-end: a real server over a real Unix socket, driven through policy
+# install, event submission, verdicts, restart recovery, and control-plane
+# authorization.
+[[test]]
+name = "server_e2e"
+path = "tests/server_e2e.rs"
+
+# Pin-sharded partitioning: that a partition key is derived when — and only when —
+# the schema makes partitioning sound, and that routing groups exactly the events a
+# policy must correlate (DESIGN.md §3.3).
+[[test]]
+name = "shard_routing"
+path = "tests/shard_routing.rs"
+
+# The durable-engine tests moved to the engine crate with the assembly they
+# exercise (docs/design/DURABLE_ENGINE_REFACTOR.md step 2), each now driving
+# `DurableTemporalEngine` directly (the `ServerState` newtype is gone):
+#   - submit_contract   (the sequencer's offset/timestamp contract)
+#   - store_invariants   (log-shape/durability invariants + the shared harness)
+#   - recovery_oracle    (crash-recover verdicts vs. the reference interpreter)
+# `apply_crash_safety` stays here: it is a socket/restart test, not an engine one.

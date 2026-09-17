@@ -1,0 +1,15 @@
+# Ignore the `build/` directory in the package root.
+/build
+
+# Cargo lockfile is not committed for this library package.
+**/Cargo.lock
+
+# Generated, machine-specific toolchain pointer.
+rust-toolchain.toml
+
+target/
+.idea/
+.vscode/
+__pycache__/
+.DS_Store
+.exploration

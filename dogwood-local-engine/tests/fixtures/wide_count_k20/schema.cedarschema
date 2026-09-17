@@ -1,0 +1,24 @@
+  entity User;
+  entity Gateway;
+
+  type GuardInput = {
+    g: Long,
+  };
+
+  action "Guard" appliesTo {
+    principal: [User],
+    resource: [Gateway],
+    context: { input: GuardInput }
+  };
+
+  type CounterInput = {
+    amt: Long,
+  };
+
+  action "Counter" appliesTo {
+    principal: [User],
+    resource: [Gateway],
+    context: { input: CounterInput }
+  };
+
+

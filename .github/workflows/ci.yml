@@ -22,7 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Use first-party actions; install the Rust toolchain through rustup.
+      # persist-credentials: false — token isn't used after checkout.
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       # Install the toolchain via rustup (preinstalled on GitHub runners) rather
       # than a third-party action. edition 2024 needs a recent stable.
@@ -33,15 +36,14 @@ jobs:
           rustup component add rustfmt clippy
           rustc --version
 
+      # Cache only content-addressed download dirs, not target/ (poisoning vector).
       - name: Cargo cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-          restore-keys: cargo-${{ runner.os }}-
 
       - name: Build
         run: cargo build --workspace --all-targets

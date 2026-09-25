@@ -15,7 +15,7 @@ path = "src/lib.rs"
 [dependencies]
 # The frontend: the reference (in-memory) engine and the lowering pipeline both
 # benchmarks drive.
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0" }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0" }
 # The single-machine engine, for measuring the durable path directly.
 dogwood-local-engine = { path = "../dogwood-local-engine" }
 # The server: benchmarked in-process (`DurableTemporalEngine`) and over its socket.

@@ -1,9 +1,15 @@
 [package]
 name = "dogwood-local-engine"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 publish.workspace = true
 description = "A single-machine, event-sourced temporal engine for Dogwood: an incremental monitor over a durable local event log, implementing `dogwood_language::TemporalEngine`. The no-AWS counterpart to the DSQL/Aurora backend."
+license = "Apache-2.0"
+repository = "https://github.com/dogwood-policy/dogwood-local-engine"
+homepage = "https://dogwood-policy.github.io/dogwood/"
+documentation = "https://docs.rs/dogwood-local-engine"
+keywords = ["authorization", "policy", "temporal", "dogwood"]
+categories = ["authentication"]
 exclude = ["/build", "/Config", "/build-tools/"]
 
 [lib]
@@ -25,8 +31,8 @@ shuttle = ["fault-injection", "dep:shuttle"]
 # An intra-workspace `path` dep, but this crate is published, so it also needs a
 # `version`: Cargo builds against the path locally and records the version in
 # the published manifest (cross-package consumers use `dogwood-language =
-# "0.1"` the same way).
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0" }
+# "1.0"` the same way).
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0" }
 # The durable event log: a pure-Rust ACID embedded key–value store (no C
 # toolchain, clean cross-compile) — the storage substrate decided in DESIGN.md
 # §6.1. Used only as an append-only log + snapshot store, never as a query
@@ -53,7 +59,7 @@ shuttle = { version = "0.9.3", optional = true }
 [dev-dependencies]
 # Differential testing against the interpreter oracle runs over the embedded
 # regression corpus (feature `corpus` on the frontend).
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0", features = ["corpus"] }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0", features = ["corpus"] }
 
 # The corpus differential: LocalTemporalEngine must agree with the in-memory
 # interpreter oracle on every passing case. The referee for the incremental

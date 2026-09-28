@@ -119,11 +119,6 @@ not limited to, the following concerns:
   clock dilation, contraction, or skew from affecting outcomes, so the host
   clock must still be secured and monitored.
 
-## Design documents
-
-- [`docs/design/DESIGN.md`](docs/design/DESIGN.md): the engine's architecture
-  and the decisions behind it.
-
 ## Building and testing
 
 The workspace builds with a recent stable Rust toolchain (edition 2024):

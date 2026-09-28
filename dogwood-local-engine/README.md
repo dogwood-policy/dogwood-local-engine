@@ -269,7 +269,6 @@ explains each of these in detail.
   [temporal expressions](https://dogwood-policy.github.io/dogwood/guide/04-temporal-expressions.html),
   and the [CLI](https://dogwood-policy.github.io/dogwood/guide/12-cli.html) for
   validating and replaying policies before installing them.
-- The engine's [design notes](https://github.com/dogwood-policy/dogwood-local-engine/blob/main/docs/design/DESIGN.md).
 - `dogwood-server`, in the same repository, is a reference demo that puts the
   engine behind Unix sockets with a separate control plane for policy changes.
 

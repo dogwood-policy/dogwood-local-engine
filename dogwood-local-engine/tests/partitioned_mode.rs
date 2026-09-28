@@ -1,4 +1,4 @@
-//! Native pin partitioning at the SERVER level (PARTITION_DESIGN.md §4.1):
+//! Native pin partitioning at the SERVER level:
 //! auto-enabled whenever the schema declares universal symmetric pins
 //! (the default event schema pins `callerPrincipal`).
 //!

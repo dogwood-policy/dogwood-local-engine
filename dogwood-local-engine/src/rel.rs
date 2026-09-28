@@ -12,9 +12,7 @@
 //! The operator algebra reads children through [`RelRead`] alone, never a
 //! concrete container, so the representation is a swappable impl behind the
 //! [`Rel`] / [`LeafStore`] aliases: sparse today, dense later, with no operator
-//! change. `PERFORMANCE.md` §5 records the representation choices deliberately
-//! deferred behind these aliases (dense interiors, per-node rep selection) and
-//! why.
+//! change.
 //!
 //! # How the two roles connect
 //!
@@ -164,10 +162,7 @@ pub(crate) struct SparseLeaf {
     /// are expired but not yet physically removed. `drop_front` only
     /// advances this cursor; the vector is compacted (one drain +
     /// memmove) when the dead prefix outgrows the live tail — O(1)
-    /// amortized per expired match. The eager `drain(..keep)` design
-    /// memmoved the WHOLE tail per prune, and in steady state pruning
-    /// fires on ~every observe: O(in-window matches) PER EVENT
-    /// (exhibited by tests/leaf_prune.rs `p1`).
+    /// amortized per expired match.
     start: usize,
     base: usize,
     next: usize,

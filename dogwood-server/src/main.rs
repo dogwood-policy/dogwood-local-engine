@@ -120,8 +120,8 @@ enum PolicyCommand {
     /// The server validates the bundle against the schema before accepting it and
     /// swaps atomically; a rejected install leaves the running set serving (§8).
     /// This is also where the event schema is configured, once: it is fixed
-    /// thereafter, and a later install that changes it is rejected
-    /// (`POLICY_INSTALL_SEMANTICS.md` §2.7). Every policy is reborn
+    /// thereafter, and a later install that changes it is rejected.
+    /// Every policy is reborn
     /// (`[DeleteAll; Add …]`, §2.8); use the incremental verbs below to keep
     /// existing history.
     Install {

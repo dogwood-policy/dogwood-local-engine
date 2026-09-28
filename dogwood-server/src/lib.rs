@@ -20,7 +20,6 @@
 //!   holds directly. The only work between wire and engine is mapping the wire
 //!   [`WireEvent`](protocol::WireEvent) to an event builder
 //!   ([`codec::to_event_builder`]); durability and recovery are the engine's.
-//!   See `docs/design/DURABLE_ENGINE_REFACTOR.md`.
 //! - [`peer`] — peer-credential attestation and the control-plane uid allowlist
 //!   (§8.1). The mechanism the whole boundary rests on.
 //! - [`codec`] — the event wire/log format.

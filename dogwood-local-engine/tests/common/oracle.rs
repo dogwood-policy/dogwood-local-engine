@@ -218,8 +218,8 @@ fn history_start(ops: &[Op]) -> Result<(&Installed, i64), Unavailable> {
 
 /// Lower a bundle from its own source, independently of the engine's own rebuild.
 ///
-/// The service schema (event schema + macros) is store config now
-/// (`POLICY_INSTALL_SEMANTICS.md` §2.7), no longer carried in `Installed`. Every
+/// The service schema (event schema + macros) is store config now,
+/// no longer carried in `Installed`. Every
 /// oracle-driven workload configures the store with the **default** service
 /// schema, so the reference lowers against the defaults too; a workload that
 /// wanted a custom event schema would have to thread its config in here.

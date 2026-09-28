@@ -2,7 +2,7 @@
 //!
 //! A durable verb record is re-applied at its own position in the order,
 //! through the same composite `(id, clause ordinal)` transplant a live batch
-//! uses (`POLICY_INSTALL_SEMANTICS.md` §2.3, §2.6). These tests hand-write the
+//! uses. These tests hand-write the
 //! records — that is the point of testing the path before anything depends on
 //! it — and cover the three retention outcomes that matter:
 //!

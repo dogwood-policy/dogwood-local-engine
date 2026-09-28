@@ -1,4 +1,4 @@
-//! The `SetActionSchema` verb (`POLICY_INSTALL_SEMANTICS.md` §2.7).
+//! The `SetActionSchema` verb.
 //!
 //! The action schema is the **mutable** half of the bundle: unlike the event
 //! schema and macros (store config, immutable through the verbs — see

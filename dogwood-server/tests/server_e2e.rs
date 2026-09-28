@@ -1307,7 +1307,7 @@ fn concurrent_submissions_are_all_recorded() {
     // Every event reached the log exactly once. A dropped append would show as a
     // low offset; a double append as a high one. The install itself occupies a
     // contiguous *range* of per-verb records — one per policy plus the schema
-    // and `DeleteAll` preamble (`POLICY_INSTALL_SEMANTICS.md` §2.6). For
+    // and `DeleteAll` preamble. For
     // `PLAIN_POLICY` (one policy) the install writes 3 records:
     // `SetActionSchema + DeleteAll + Add`. (The event schema is store config in a
     // metadata slot, not a log record, §2.7.)

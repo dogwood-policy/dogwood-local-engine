@@ -513,7 +513,7 @@ fn serve_control(
     // never parsed, so a caller who may not author policy cannot reach the
     // deserializer for policy-bearing types at all. The uid is used only to gate
     // access here; it is not forwarded to the engine, which records no attributed
-    // audit trail (docs/design/DURABLE_ENGINE_REFACTOR.md §5.3).
+    // audit trail.
     match peer_cred(&stream) {
         Ok(cred) if allowlist.permits(cred.uid) => {}
         Ok(cred) => {

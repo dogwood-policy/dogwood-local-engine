@@ -201,7 +201,7 @@ pub enum DataResponse {
 
 // ─── The control plane (privileged socket only) ──────────────────────
 
-/// One policy-management verb on the wire (`POLICY_INSTALL_SEMANTICS.md` §2.1),
+/// One policy-management verb on the wire,
 /// the transport form of `dogwood_local_engine::Verb`.
 ///
 /// `Add` carries no id — the engine mints one and returns it in
@@ -251,8 +251,8 @@ pub struct PolicySummary {
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ControlRequest {
     /// Install a complete policy set + schema, replacing whatever is installed
-    /// — the declarative path (`[DeleteAll; Add …]`, `POLICY_INSTALL_SEMANTICS.md`
-    /// §2.8). Also the store-configuration entry point: it sets the event schema
+    /// — the declarative path (`[DeleteAll; Add …]`).
+    /// Also the store-configuration entry point: it sets the event schema
     /// (fixed thereafter, §2.7). Maps to the engine's `install`.
     ///
     /// The server **validates before accepting** and swaps atomically; a

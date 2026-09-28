@@ -152,8 +152,8 @@ impl ServerHarness {
     /// `SetActionSchema` with the unchanged schema re-lowers and re-validates the
     /// whole set while carrying every leaf's window (nothing is marked fresh), so
     /// `leaves_retained` is the full leaf count and the transplant is what gets
-    /// timed. An `install` would be reborn-all (`POLICY_INSTALL_SEMANTICS.md`
-    /// §2.1) — it transplants nothing and would return 0.
+    /// timed. An `install` would be reborn-all
+    /// — it transplants nothing and would return 0.
     pub fn reapply(&mut self) -> usize {
         self.state
             .batch(vec![Verb::SetActionSchema {

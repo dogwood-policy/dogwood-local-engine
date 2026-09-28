@@ -201,7 +201,7 @@ fn a_pin_on_only_one_event_kind_is_not_a_partition_key() {
 /// sharded plan, an unpinned one does not.
 ///
 /// The event schema is store configuration now, fixed at the first install and
-/// immutable thereafter (`POLICY_INSTALL_SEMANTICS.md` §2.7) — changing a pin
+/// immutable thereafter — changing a pin
 /// re-buckets all state, so it is a deliberate store rebuild, not an apply. So
 /// each schema is exercised on its **own** store (the rebuild), and an attempt
 /// to switch the event schema on a live store is asserted to be **rejected**.
@@ -241,7 +241,7 @@ fn shardability_follows_the_stores_event_schema() {
 
 /// The store's event schema is durable: a **custom** (non-default) event schema
 /// configured at install is still in force after a restart, not reverted to the
-/// built-in default (`POLICY_INSTALL_SEMANTICS.md` §2.7 — it lives in a metadata
+/// built-in default (it lives in a metadata
 /// slot, read back at open).
 ///
 /// The default schema *pins* `callerPrincipal` (shardable); `UNPINNED_EVENT_SCHEMA`

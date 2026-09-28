@@ -1,5 +1,5 @@
-//! The verb-batch policy-management surface (`POLICY_INSTALL_SEMANTICS.md`
-//! §2.1): `install` (whole-set) + `batch` (Add/Update/Delete) over stable
+//! The verb-batch policy-management surface:
+//! `install` (whole-set) + `batch` (Add/Update/Delete) over stable
 //! engine-minted ids, plus the `list`/`get_policy` reads. Exercises the real
 //! `expanded_source` canonicalization and — the key durability guarantee —
 //! that a policy's id survives a restart.

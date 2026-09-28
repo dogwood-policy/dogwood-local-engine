@@ -1,5 +1,5 @@
 //! The `(policy id, clause index)` transplant soundness claims
-//! (`POLICY_INSTALL_SEMANTICS.md` §2.3) — the properties that distinguish the
+//! — the properties that distinguish the
 //! new retention model from the content-keyed one it replaces. Each test is
 //! written to **fail under content-only keying**, so it pins the actual benefit
 //! of scoping retention to the policy id rather than the clause text:

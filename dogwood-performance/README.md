@@ -6,9 +6,7 @@ the **durable server** (`dogwood-server`), across policy count (10 / 100 / 1000 
 10 000), session pinning (on / off, by predicate shape), and concurrent request rate
 (1 → 500 rps).
 
-> **Looking for the numbers and what they mean?** See **[RESULTS.md](RESULTS.md)** —
-> the findings, with the caveats and known confounds spelled out. This file is the
-> harness: how to run it and why each benchmark is built the way it is.
+> This file is the harness: how to run it and why each benchmark is built the way it is.
 
 ## Running it
 

@@ -1,43 +1,4 @@
-//! A single-machine, event-sourced temporal engine for Dogwood.
-//!
-//! This crate is the no-AWS counterpart to the DSQL/Aurora
-//! backend: an incremental temporal monitor over a durable *local* event log,
-//! implementing [`dogwood_language::TemporalEngine`]. It is embeddable as a
-//! library; the security-bearing server (`dogwood-server`) builds on it, adding
-//! the process boundary that keeps the policy set outside a monitored agent's
-//! reach — which a library the agent links cannot do.
-//!
-//! See `DESIGN.md` for the architecture: the durable ordered log as the source
-//! of truth, Monpoly-style incremental evaluation of the past-only temporal
-//! operators, window/snapshot-bounded state and log pruning, and prospective
-//! (install-offset-scoped) policy semantics.
-//!
-//! # What is here
-//!
-//! - [`LocalTemporalEngine`] evaluates each temporal leaf at the current decision
-//!   timepoint with a per-leaf **incremental monitor** — the general table-based
-//!   `meval` ported from the verified MonPoly/VeriMon reference (`DESIGN.md` §4),
-//!   not a whole-history rescan. It agrees with the interpreter oracle
-//!   case-for-case over the whole passing corpus (`tests/corpus_diff.rs`), which
-//!   also asserts that **every** real leaf is on the incremental path. Each
-//!   monitor front-prunes its own windowed state to its own lookback (§6.2), so
-//!   state stays bounded for bounded-window policies without any shared history.
-//! - [`LocalTemporalEngine`] uses [`dogwood_language::DecisionLeafMap`] to
-//!   compute only the temporal leaves reachable by the decision's action.
-//! - [`DurableLog`] is a redb-backed, ordered, append-only event log with atomic
-//!   fsync'd append, prefix pruning, and a snapshot slot (§3, §6).
-//! - [`leaf_key`] gives each leaf a **content-derived identity** so a policy
-//!   change can preserve unchanged rules' accumulated windows while genuinely new
-//!   rules start empty — the mechanism prospective installs rest on (§9.1). Used
-//!   with [`LocalTemporalEngine::save_keyed_state`] /
-//!   [`load_keyed_state`](LocalTemporalEngine::load_keyed_state).
-//!
-//! # What this crate deliberately does not do
-//!
-//! It knows nothing about callers, IPC, or who may change a policy. Embedding it
-//! gives correctness and durability but **not** tamper-resistance — your process
-//! can still rewrite the policy set it is judged by. `dogwood-server` is where
-//! that changes.
+#![doc = include_str!("../README.md")]
 
 mod clock;
 mod codec;
@@ -65,8 +26,7 @@ pub use log::{DurableLog, LogError, Pruned, Snapshot, Write};
 pub use tick::TickRate;
 
 // The durable-engine assembly: the crash-consistent, event-sourced decision
-// service layered over `DurableLog` + `LocalTemporalEngine`. See `durable.rs`
-// and `docs/design/DURABLE_ENGINE_REFACTOR.md`.
+// service layered over `DurableLog` + `LocalTemporalEngine`.
 pub use clock::{Clock, WallClock};
 pub use durable::{
     Applied, BatchResult, DecisionDiagnostics, DecisionResponse, DurableConfig, DurableError,
@@ -78,9 +38,6 @@ pub use policy_store::{FoldOutcome, FoldedRecord};
 pub use record::{Record, SnapshotPayload};
 pub use shard::ShardPlan;
 
-// The durable engine + its event codec seam are defined below; named here for
-// discoverability alongside the log types they build on.
-
 use std::sync::Arc;
 
 use dogwood_language::cedar::Schema;
@@ -88,23 +45,14 @@ use dogwood_language::{
     DecisionLeafMap, Error, Event, EventSignature, TemporalBindings, TemporalEngine, TemporalField,
 };
 
-/// A single-machine [`TemporalEngine`]: retains the observed event log and
-/// evaluates each temporal leaf at the current decision timepoint.
-///
-/// The retained trace is **window-pruned** (`DESIGN.md` §6.2): after each
-/// observed event, events older than the installed leaves' maximum lookback
-/// reach are dropped — they can never again fall inside any operator's window,
-/// so verdicts are unchanged while steady-state memory (and, with bounded
-/// windows, per-event scan cost) stays bounded. Pruning drops nothing when any
-/// leaf's reach is effectively unbounded (a windowless operator); those cases
-/// are what snapshots (§6.3) will bound instead.
+/// A single-machine [`TemporalEngine`]: evaluates each temporal leaf at the
+/// current decision timepoint.
 #[derive(Default)]
 pub struct LocalTemporalEngine {
     /// The temporal leaves to evaluate, installed at `prepare`.
     leaves: Vec<TemporalField>,
     /// The stable [`PolicyId`] of each installed policy, indexed by the policy's
-    /// **source position** (`policy_N` in a leaf's `id`, `POLICY_INSTALL_SEMANTICS.md`
-    /// §2.3). Set by [`set_policy_ids`](Self::set_policy_ids) after `prepare`, so
+    /// **source position** (`policy_N` in a leaf's `id`). Set by [`set_policy_ids`](Self::set_policy_ids) after `prepare`, so
     /// the keyed-state transplant can key each leaf by `(stable policy id,
     /// within-policy clause ordinal)` rather than by content — which is what makes
     /// retention scope to the *policy* (no cross-policy window sharing) and survive
@@ -113,11 +61,11 @@ pub struct LocalTemporalEngine {
     /// nothing, so it starts empty).
     policy_ids: Vec<PolicyId>,
     /// The most recently observed event: the decision point every `evaluate`
-    /// anchors on, and the only event any reader ever wanted.
+    /// anchors on.
     ///
     /// `None` before the first `observe`, and after a snapshot-based recovery
     /// until a live event arrives — `step_monitors` deliberately advances
-    /// monitors without it, since a snapshot carries monitor state and no trace.
+    /// monitors without it.
     latest: Option<Event>,
     /// The unit the timestamps this engine is fed are in, used to convert each
     /// declared window into the same domain (see [`TickRate`]). Seconds by
@@ -135,17 +83,12 @@ pub struct LocalTemporalEngine {
     /// genuinely shared — and sharing is momentary: the old engine is dropped as
     /// soon as the new set is installed, so the refcount is 1 and stepping is
     /// free from then on.
-    ///
-    /// Sharing rather than moving is what keeps a failed apply harmless. A move
-    /// would gut the running engine before the new set is known to be valid and
-    /// durable; sharing leaves the old monitors intact and unmutated, so a
-    /// rejected apply changes nothing.
     monitors: Vec<Arc<incremental::Monitor>>,
     /// Aggregate-memo kill switch (inverted so `derive(Default)` means
     /// ENABLED): set via `disable_agg_memo()` or, fleet-wide, the
     /// DOGWOOD_DISABLE_AGG_MEMO env var (checked at prepare).
     agg_memo_disabled: bool,
-    /// Partition keys (docs/design/PARTITION_DESIGN.md): non-empty ⇒
+    /// Partition keys: non-empty ⇒
     /// partitioned mode — `prepare` builds ShardedMonitors from the
     /// NON-relativized leaves the caller passes, and every event routes
     /// to its pin's shard.
@@ -186,7 +129,7 @@ impl LocalTemporalEngine {
     /// its windows are compared in. See [`TickRate`].
     ///
     /// Must be set BEFORE `prepare`: the conversion is applied when the monitors
-    /// and the retention horizon are built, so a later change would leave
+    /// are built, so a later change would leave
     /// already-built windows in the old unit.
     pub fn with_tick_rate(mut self, rate: TickRate) -> Self {
         self.tick_rate = rate;
@@ -195,11 +138,7 @@ impl LocalTemporalEngine {
 }
 
 impl TemporalEngine for LocalTemporalEngine {
-    /// `events` (the declared event signatures) is unused: this engine
-    /// *interprets* each leaf's condition over a retained trace rather than
-    /// compiling it to a query, so it never needs the declared field types to
-    /// emit type-correct comparisons — it compares `Value`s directly with the
-    /// frontend's own equality.
+    /// `events` (the declared event signatures) is unused.
     /// `schema` supplies the actions used to rebuild the leaf map.
     fn prepare(
         &mut self,
@@ -210,16 +149,6 @@ impl TemporalEngine for LocalTemporalEngine {
         self.leaves = leaves.to_vec();
         // Build an incremental monitor per leaf, and refuse the whole policy set
         // if any leaf cannot be compiled.
-        //
-        // Failing here rather than deferring to the scan fallback is deliberate.
-        // Every condition `Monitor::build` declines is an unexpanded macro
-        // artefact — `ConditionKind::Call`, `SigilRef`, `Refine`, or an
-        // `AggExprKind::Call` inside an operand — and [`eval`] *panics* on all
-        // four, phrased as "expansion did not run". So the fallback is not a
-        // slower path for those leaves; it is a panic waiting for the first
-        // decision, inside `is_authorized`, whose whole contract is to fail
-        // closed. Rejecting at preparation turns that into an apply the control
-        // plane declines, with the offending leaf named.
         let mut monitors = Vec::with_capacity(self.leaves.len());
         for leaf in &self.leaves {
             match incremental::Monitor::build(&leaf.condition.condition, self.tick_rate) {
@@ -298,8 +227,7 @@ impl TemporalEngine for LocalTemporalEngine {
             self.latest = Some(event.clone());
             return;
         }
-        // Advance every incremental monitor by this event (before pruning the
-        // trace — a monitor's state summarizes all events it has seen).
+        // Advance every incremental monitor by this event.
         for m in self.monitors.iter_mut() {
             Arc::make_mut(m).step(event);
         }
@@ -348,10 +276,9 @@ fn unresolved_composite_key(leaf_content_key: &str) -> String {
 /// A leaf's transplant key: `"{policy id}:{clause ordinal}:{leaf_content_key}"`.
 ///
 /// The `(stable policy id, within-policy clause ordinal)` prefix is the
-/// retention identity (§2.3); the trailing `leaf_content_key` is content, kept
+/// retention identity; the trailing `leaf_content_key` is content, kept
 /// as a **defensive guard** folded into the key so a match requires the formula
-/// itself to still agree — a stronger, fail-safe form of §2.3's "defensive
-/// assertion" (a disagreement resets rather than carrying, never panicking in
+/// itself to still agree (a disagreement resets rather than carrying, never panicking in
 /// release). Because the policy id and ordinal are colon-free digit runs, the
 /// two leading colons are unambiguous separators, so the key is injective in
 /// `(id, ordinal, content)` regardless of what the content contains.
@@ -643,8 +570,8 @@ impl LocalTemporalEngine {
         self.leaf_map.unresolved().to_vec()
     }
 
-    /// How many installed leaves run on the incremental path (vs. the scan
-    /// fallback). A diagnostic — and the hook tests use to prove the
+    /// How many installed leaves run on the incremental path.
+    /// A diagnostic — and the hook tests use to prove the
     /// incremental operators are actually exercised. Valid after `prepare`.
     pub fn incremental_leaf_count(&self) -> usize {
         if self.partition_keys.is_empty() {
@@ -689,11 +616,7 @@ impl LocalTemporalEngine {
         // must not load into a partitioned engine (or vice versa), and a
         // partitioned one must not load under a different key set — the
         // shard payloads would be misread positionally.
-        // Preamble ONLY in partitioned mode (review F1): global
-        // fingerprints stay byte-identical to the pre-partitioning
-        // format so existing production snapshots keep loading across
-        // the upgrade — breaking them, combined with pruned logs, was a
-        // silent history hole.
+        // Preamble ONLY in partitioned mode.
         //
         // WHY cross-mode fingerprints can never collide (the precise
         // invariant — re-verify before ANY change to this encoding, it
@@ -723,7 +646,7 @@ impl LocalTemporalEngine {
         out
     }
 
-    /// Serialize every incremental monitor's derived state (`DESIGN.md` §6.3),
+    /// Serialize every incremental monitor's derived state,
     /// length-prefixed per leaf in `leaves` order, so a restart can restore the
     /// monitors without replaying the whole log — the only way to bound
     /// recovery (and log pruning) for **unbounded** operators, whose window
@@ -731,11 +654,7 @@ impl LocalTemporalEngine {
     ///
     /// Prefixed with [`state_fingerprint`](Self::state_fingerprint), so a
     /// snapshot cannot be loaded into a different leaf set.
-    ///
-    /// Only the incremental state is captured; the retained event trace (used
-    /// by the defensive scan path) is not — a snapshot-based recovery replays
-    /// only post-snapshot events, which is exactly what makes it cheap.
-    /// Kill switch for the aggregate memo (MEMO_DESIGN.md).
+    /// Kill switch for the aggregate memo.
     /// Effective in either order: before `prepare` (sets the default
     /// for built monitors) or after (disables the live ones). Also
     /// settable fleet-wide via `DOGWOOD_DISABLE_AGG_MEMO`.
@@ -777,7 +696,6 @@ impl LocalTemporalEngine {
         })
     }
 
-    /// PARTITIONING HOOKS (docs/design/PARTITION_DESIGN.md).
     /// Whether this engine runs in partitioned mode (pins installed).
     #[doc(hidden)]
     pub fn is_partitioned(&self) -> bool {
@@ -810,10 +728,9 @@ impl LocalTemporalEngine {
     /// own; observe-driven sweeps are bounded, this one is exhaustive).
     #[doc(hidden)]
     pub fn maintain_all(&mut self) {
-        // Gate on the sweep CLOCK, not `latest` (review F5): recovery
+        // Gate on the sweep CLOCK, not `latest`: recovery
         // replays through step_monitors, which advances global_now but
-        // never sets latest — the latest-gate made post-recovery idle
-        // sweeps silent no-ops until the first live observe.
+        // never sets latest.
         if self.global_now == i64::MIN {
             return;
         }
@@ -844,7 +761,7 @@ impl LocalTemporalEngine {
         out.extend_from_slice(&(fingerprint.len() as u64).to_le_bytes());
         out.extend_from_slice(&fingerprint);
         if !self.partition_keys.is_empty() {
-            // Format v2 (PARTITION_DESIGN.md §4.3): global_now, then one
+            // Format v2: global_now, then one
             // sharded body per leaf. The fingerprint above already binds
             // mode + keys, so a v1 reader refuses before touching this.
             out.extend_from_slice(&self.global_now.to_le_bytes());
@@ -882,9 +799,7 @@ impl LocalTemporalEngine {
         // Refuse a snapshot describing a DIFFERENT leaf set before restoring any
         // state. The payload below is positional, so without this a stale
         // snapshot of equal arity would load successfully and hand one formula
-        // another's history — see `state_fingerprint`. A snapshot written before
-        // fingerprinting existed fails here too (its leading bytes are a monitor
-        // count, not a length-prefixed key sequence), which degrades to replay.
+        // another's history — see `state_fingerprint`.
         let Some(fp_len) = read_usize(bytes, &mut pos) else {
             return false;
         };
@@ -975,14 +890,10 @@ impl LocalTemporalEngine {
         true
     }
 
-    /// Advance only the incremental monitors by `event` — **not** the retained
-    /// trace — for replaying post-snapshot events during recovery (the trace is
-    /// not part of a snapshot, and monitors carry their own windowed timeline).
+    /// Advance only the incremental monitors by `event`, for replaying
+    /// post-snapshot events during recovery.
     pub fn step_monitors(&mut self, event: &Event) {
-        // Partitioned mode (review-3 called this unreachable; it is NOT:
-        // snapshot recovery REPLAYS the post-snapshot log through here,
-        // and without routing the replayed history silently vanished —
-        // found by recovery_oracle::history_carries_across…): route the
+        // Partitioned mode: route the
         // event exactly as observe does, advancing the sweep clock, but
         // deliberately NOT touching `latest`/`last_pin` — this method's
         // contract is "advance state without a decision context".
@@ -1002,11 +913,11 @@ impl LocalTemporalEngine {
         }
     }
 
-    // ─── Keyed state: the prospective-install mechanism (§9.1) ──────────
+    // ─── Keyed state: the prospective-install mechanism ──────────
 
     /// Record the stable [`PolicyId`] of each installed policy, indexed by source
-    /// position — the map the composite keyed-state key needs
-    /// (`POLICY_INSTALL_SEMANTICS.md` §2.3). Call after `prepare`, before any
+    /// position — the map the composite keyed-state key needs.
+    /// Call after `prepare`, before any
     /// transplant. `ids[N]` is the policy whose leaves carry `policy_N` in their
     /// `id`, i.e. the N-th policy in the combined source (ascending id order).
     pub fn set_policy_ids(&mut self, ids: &[PolicyId]) {
@@ -1016,8 +927,8 @@ impl LocalTemporalEngine {
     /// Serialize each incremental monitor's state **keyed by its leaf's
     /// content-derived identity** ([`leaf_key`]) rather than by position.
     ///
-    /// This is what makes prospective policy installs correct (`DESIGN.md`
-    /// §9.1). [`save_snapshot`](Self::save_snapshot) is positional, so it is
+    /// This is what makes prospective policy installs correct.
+    /// [`save_snapshot`](Self::save_snapshot) is positional, so it is
     /// only valid when reloaded into an engine prepared with the *identical*
     /// leaf list — fine for crash recovery, wrong across a policy change, where
     /// inserting a rule shifts every later leaf's index and would hand one
@@ -1026,20 +937,15 @@ impl LocalTemporalEngine {
     ///
     /// - an **unchanged** leaf finds its key and resumes with its window intact;
     /// - a **new** leaf finds no key and starts empty — exactly the prospective
-    ///   semantics of §9, with no epoch bookkeeping needed in the state itself;
+    ///   semantics, with no epoch bookkeeping needed in the state itself;
     /// - a **removed** leaf's entry is simply never claimed.
     ///
-    /// Non-incremental leaves (scan fallback, no derived state) are omitted.
     /// Hand every leaf's accumulated state to another engine **without copying
     /// it**, keyed by content-derived identity ([`leaf_key`]) exactly as
     /// [`save_keyed_state`](Self::save_keyed_state) is.
     ///
     /// This is the in-memory counterpart of the serialized form, and the one a
-    /// policy change should use. Serializing was pure overhead there: the bytes
-    /// were produced and immediately parsed back to move state between two
-    /// engines in the same process, and the cost grew with retained history — an
-    /// apply against 20 000 events cost ~397 ms, nearly all of it this round
-    /// trip. Sharing an [`Arc`] is O(1) per leaf and converts no formats.
+    /// policy change should use. Sharing an [`Arc`] is O(1) per leaf and converts no formats.
     ///
     /// Use [`save_keyed_state`](Self::save_keyed_state) when the destination is a
     /// disk; use this when it is another engine.
@@ -1047,8 +953,6 @@ impl LocalTemporalEngine {
         // Partitioned engines have no per-leaf monitor to transplant —
         // iterating self.monitors here would SILENTLY LOSE every shard
         // on a policy apply (masked by prospective-install semantics).
-        // Refuse until the sharded transplant lands
-        // (PARTITION_DESIGN.md §4 discipline).
         self.validate_leaf_state_transfer()?;
         let keys: Vec<String> = self
             .leaves
@@ -1064,7 +968,7 @@ impl LocalTemporalEngine {
     /// Adopt shared leaf state, matched by [`leaf_key`]. Returns how many leaves
     /// were given a window; the rest retain their prior state. Policy rebuild
     /// callers use a freshly prepared destination, so those unmatched leaves
-    /// remain empty, which is prospective-install semantics (`DESIGN.md` §9.1).
+    /// remain empty, which is prospective-install semantics.
     ///
     /// The adopting engine shares each monitor with whoever handed it over until
     /// the first mutation, and `Arc::make_mut` only copies while both are alive.
@@ -1077,8 +981,6 @@ impl LocalTemporalEngine {
         // Partitioned engines have no per-leaf monitor to transplant —
         // iterating self.monitors here would SILENTLY LOSE every shard
         // on a policy apply (masked by prospective-install semantics).
-        // Refuse until the sharded transplant lands
-        // (PARTITION_DESIGN.md §4 discipline).
         self.validate_leaf_state_transfer()?;
         // Precompute the composite keys before mutably borrowing the monitors.
         let keys: Vec<String> = self
@@ -1141,7 +1043,7 @@ impl LocalTemporalEngine {
     /// An entry whose bytes fail to load is skipped, leaving that leaf empty
     /// rather than half-loaded — a leaf that under-reports history is the
     /// fail-safe direction (it can only fail to fire a `formerly`, matching a
-    /// freshly-installed rule's warm-up window, §9.2).
+    /// freshly-installed rule's warm-up window).
     pub fn load_keyed_state(
         &mut self,
         entries: &[(String, Vec<u8>)],
@@ -1180,11 +1082,7 @@ impl LocalTemporalEngine {
     }
 
     /// The content-derived identity of every installed leaf, in `leaves` order —
-    /// a **diagnostic**. The transplant used to key on this alone, but since
-    /// `POLICY_INSTALL_SEMANTICS.md` §2.3 retention is scoped to the policy
-    /// (composite `(policy id, clause ordinal)`, not shared across policies), the
-    /// bare content key is retained only for observability and the defensive-guard
-    /// tail of the composite key builder.
+    /// a **diagnostic**.
     pub fn leaf_keys(&self) -> Vec<String> {
         self.leaves.iter().map(leaf_key).collect()
     }

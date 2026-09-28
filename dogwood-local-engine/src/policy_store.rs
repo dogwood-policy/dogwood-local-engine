@@ -1,12 +1,11 @@
-//! Structured per-policy storage and the transactional verb-batch fold
-//! (`docs/design/POLICY_INSTALL_SEMANTICS.md` §2.1–2.5).
+//! Structured per-policy storage and the transactional verb-batch fold.
 //!
 //! This is the *pure data model* for the policy set: it owns an ordered list of
 //! installed policies — each a stable, engine-minted [`PolicyId`] plus its
 //! canonical statement — and folds a batch of [`Verb`]s into a new set,
 //! reporting per-policy **retention** (which policies must start fresh vs. keep
 //! their accumulated window) so the durable/engine layer can carry or reset
-//! monitor state by `(id, clause index)` rather than by content (§2.3).
+//! monitor state by `(id, clause index)` rather than by content.
 //!
 //! Durability, recovery, lowering, and the running authorizer live elsewhere.
 //! Canonicalizing a policy's source (parse → macro-expand → render back to a
@@ -28,7 +27,7 @@ fn ensure_ordinal_capacity(next_id: u64, statement_count: usize) -> Result<(), &
 
 /// The **internal ordinal**: a monotonic, never-reused sequence number the engine
 /// assigns each policy in creation order. It is the *ordering* and *transplant*
-/// key — the composite `(id, clause-index)` retention key (§2.3) rests on it, and
+/// key — the composite `(id, clause-index)` retention key rests on it, and
 /// it is unique **by construction** (the cursor only advances, even across
 /// delete/`DeleteAll`), so a new policy can never inherit a deleted one's monitor
 /// window. It is **not** the caller-facing handle (that is [`PolicyToken`]); it
@@ -45,12 +44,12 @@ impl std::fmt::Display for PolicyId {
 }
 
 /// The **external handle**: an opaque, non-sequential token the engine mints on
-/// `Add` (`SP` + base62 of 128 random bits, mirroring AVP's opaque `policyId`)
+/// `Add` (`SP` + base62 of 128 random bits)
 /// and durably records so recovery re-uses it and never re-mints. This is what
 /// callers see in `minted`/`list`/`get` and name in `Update`/`Delete`/`Reset`.
 ///
 /// It is deliberately unpredictable so callers cannot couple to the internal
-/// ordinal's sequence or order (order is conveyed by `created`, §2.7). Correctness
+/// ordinal's sequence or order (order is conveyed by `created`). Correctness
 /// never depends on it being collision-free: monitor state is keyed on the
 /// [`PolicyId`] ordinal, so even a token collision cannot carry the wrong history.
 /// Uniqueness among *live* policies is enforced at mint (regenerate on the
@@ -69,8 +68,7 @@ impl std::fmt::Display for PolicyToken {
 /// One installed policy: its opaque external handle ([`token`](Self::token)), its
 /// internal ordinal ([`id`](Self::id) — ordering + transplant key), its
 /// **canonical** statement (the rendered source, so a semantics-preserving
-/// reformat does not churn it), and the store-assigned create/update timestamps
-/// (§2.4).
+/// reformat does not churn it), and the store-assigned create/update timestamps.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PolicyEntry {
@@ -83,9 +81,9 @@ pub struct PolicyEntry {
     pub updated: i64,
 }
 
-/// A policy-changing verb (§2.1). The `Add` here is the **control-plane** form
-/// with no id — the engine mints one during the fold. Read verbs (`list`,
-/// `GetPolicy`, `GetSchema`) are not here: they take no durable record.
+/// A policy-changing verb. The `Add` here is the **control-plane** form
+/// with no id — the engine mints one during the fold. Read operations (`list`,
+/// `get_policy`, `action_schema`) are not here: they take no durable record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verb {
     /// Install policy from a source — one new entry (minted id, born with no
@@ -97,8 +95,7 @@ pub enum Verb {
     Add { policy: String },
     /// Replace **one** policy's content by its handle — resets it (born again),
     /// same handle. The source must be exactly one policy: `Update` targets a
-    /// single policy, so a multi-policy source is rejected (mirrors AVP's
-    /// single-statement `UpdatePolicy`).
+    /// single policy, so a multi-policy source is rejected.
     Update { id: PolicyToken, policy: String },
     /// Remove a policy by its handle.
     Delete { id: PolicyToken },
@@ -109,10 +106,10 @@ pub enum Verb {
     DeleteAll,
     /// Clear every policy's history; all policies kept (re-born now).
     ResetAll,
-    /// Revalidate + re-lower the whole set under a new action schema (§2.7).
+    /// Revalidate + re-lower the whole set under a new action schema.
     SetActionSchema { action_schema: String },
-    /// **Append** declarations to the current action schema, in one atomic batch
-    /// (§2.7). The fragment is concatenated onto the schema in force, so a caller
+    /// **Append** declarations to the current action schema, in one atomic batch.
+    /// The fragment is concatenated onto the schema in force, so a caller
     /// can add a new entity/action without a read-modify-write round trip that a
     /// concurrent change could invalidate. Strictly additive — like an additive
     /// `SetActionSchema`, every window carries — and a fragment that redeclares an
@@ -135,7 +132,7 @@ pub(crate) fn append_action_schema(base: &str, fragment: &str) -> String {
 }
 
 /// Why a batch was rejected. A batch is all-or-nothing: on any error the
-/// current set is left untouched (§2.5).
+/// current set is left untouched.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BatchError {
     /// `Update`/`Delete`/`Reset` named a handle not in the set.
@@ -156,7 +153,7 @@ impl std::fmt::Display for BatchError {
 }
 
 /// One folded verb's durable effect, minus the timestamp (the engine stamps every
-/// record in a batch with the batch's single instant, §2.5). The fold emits these
+/// record in a batch with the batch's single instant). The fold emits these
 /// so the engine builds records without re-canonicalizing or re-minting — which
 /// also matters because the minted [`PolicyToken`] is random and cannot be
 /// reproduced by a second pass. Carries the resolved ordinal (`id`) so replay
@@ -317,7 +314,7 @@ impl PolicySet {
         self.entries.get(&id)
     }
 
-    /// One policy's entry by its caller-facing handle (`GetPolicy`, §2.1), or
+    /// One policy's entry by its caller-facing handle, or
     /// `None`. A linear scan — the set is small, and the token is not the map key
     /// (the ordinal is, so iteration stays creation-ordered).
     pub fn get_by_token(&self, token: &PolicyToken) -> Option<&PolicyEntry> {
@@ -364,9 +361,9 @@ impl PolicySet {
     /// Like [`from_statements`](Self::from_statements), but the ordinal cursor
     /// **continues from `next_id`** rather than restarting at 0, and each entry's
     /// opaque handle comes from `mint_token`. A declarative re-install
-    /// (`[DeleteAll; Add each]`, §2.8) wipes the set but keeps the monotone
-    /// cursor, so an ordinal a caller's handle maps to is never silently reused
-    /// (§2.4). Handles are kept unique within the set (regenerating on a clash).
+    /// (`[DeleteAll; Add each]`) wipes the set but keeps the monotone
+    /// cursor, so an ordinal a caller's handle maps to is never silently reused.
+    /// Handles are kept unique within the set (regenerating on a clash).
     /// Returns an error before calling `mint_token` if the complete replacement
     /// would exhaust the remaining ordinal space.
     pub fn from_statements_after<I: IntoIterator<Item = String>>(
@@ -412,7 +409,7 @@ impl PolicySet {
     }
 
     /// Every installed policy's id, ascending. For `ResetAll`, which marks the
-    /// whole set fresh (§2.2).
+    /// whole set fresh.
     pub fn ids(&self) -> impl ExactSizeIterator<Item = PolicyId> + '_ {
         self.entries.keys().copied()
     }
@@ -424,9 +421,9 @@ impl PolicySet {
 
     // ─── Replay-fold: applying durable verb records with explicit ids ────
     //
-    // Recovery folds the log's per-verb records (`Record::Add`/`Update`/…, §2.6)
+    // Recovery folds the log's per-verb records (`Record::Add`/`Update`/…)
     // forward one at a time. Unlike the live [`fold`], these carry ids the engine
-    // already minted, so replay must re-use them and never re-mint (§2.4). The
+    // already minted, so replay must re-use them and never re-mint. The
     // set mutations below take an explicit id and keep `next_id` monotone so a
     // later live `Add` cannot collide with a replayed one.
 
@@ -479,7 +476,7 @@ impl PolicySet {
     /// Fold a batch onto a **working copy** of this set, verb by verb in listed
     /// order (each verb sees the effect of the ones before it), and either
     /// return the committed [`FoldOutcome`] or reject the whole batch leaving
-    /// `self` conceptually untouched (§2.5). `self` is not mutated; the caller
+    /// `self` conceptually untouched. `self` is not mutated; the caller
     /// swaps in `outcome.set` only on success.
     ///
     /// `canon(source) -> Result<statements, msg>` canonicalizes a source into its
@@ -592,7 +589,7 @@ impl PolicySet {
                     records.push(FoldedRecord::ResetAll);
                 }
                 Verb::SetActionSchema { action_schema: s } => {
-                    // The schema is a bundle-level concern (§2.4/§2.7). Revalidation
+                    // The schema is a bundle-level concern. Revalidation
                     // / re-lowering of the retained set under it is the engine
                     // layer's job; here we record the requested schema (last wins).
                     action_schema = Some(s.clone());
@@ -603,7 +600,7 @@ impl PolicySet {
                 Verb::AppendActionSchema { fragment } => {
                     // Concatenate onto the schema in force so far — an earlier
                     // Set/Append in this same batch, else the current one. Sequential
-                    // (§2.5), so `[Append A; Set B; Append C]` yields `B + C`.
+                    // so `[Append A; Set B; Append C]` yields `B + C`.
                     let base = action_schema.as_deref().unwrap_or(current_action_schema);
                     action_schema = Some(append_action_schema(base, fragment));
                     records.push(FoldedRecord::AppendActionSchema {
@@ -1118,7 +1115,7 @@ mod tests {
 
     #[test]
     fn set_then_append_composes_sequentially() {
-        // Sequential (§2.5): a Set replaces the base, a following Append extends
+        // Sequential: a Set replaces the base, a following Append extends
         // that — not the original `current_action_schema`.
         let out = PolicySet::new()
             .fold(

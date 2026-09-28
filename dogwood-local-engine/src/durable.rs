@@ -5,7 +5,7 @@
 //! This is the assembly that turns the crate's two lower-level primitives — the
 //! [`DurableLog`](crate::DurableLog) and the [`LocalTemporalEngine`] monitor —
 //! into a crash-consistent, event-sourced decision service. It owns the ordering
-//! (`DESIGN.md` §3.3) that makes a verdict and its history agree under a crash:
+//! that makes a verdict and its history agree under a crash:
 //! assign a timestamp, append durably *first*, then step the monitor, then
 //! decide. `dogwood-server` wraps this behind a process boundary and a wire API;
 //! everything durability-related lives here, so an embedder gets the whole
@@ -13,21 +13,12 @@
 //!
 //! # Why one caller-held mutex over the whole thing
 //!
-//! `DESIGN.md` §3.3 settles the concurrency model as **single-writer per monitor
+//! The concurrency model is **single-writer per monitor
 //! instance**: the append point is simultaneously the sequencer and the clock,
 //! so it must be a linearization point. Every `submit` therefore takes one lock
-//! covering append + step + evaluate. That is not a placeholder for finer
-//! locking — it is the model. Concurrent callers (§3.3 expects many, since an
-//! agent may spawn many sub-agents) serialize at the append point and each
+//! covering append + step + evaluate. Concurrent callers serialize at the append point and each
 //! emerges with a distinct, strictly-increasing timestamp, which is precisely
 //! what makes the trace order well-defined without synchronized client clocks.
-//!
-//! The path to parallelism §3.3 names is **pin-sharded instances**, not
-//! finer-grained locks within one instance: correlated events must land in the
-//! same partition, or the per-partition monitor cannot join them. So this type
-//! is the unit that would be replicated per shard, and keeping its critical
-//! section honest (one lock, whole operation) is what keeps that future
-//! available.
 
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
@@ -60,25 +51,22 @@ use attribution::{RuleAttribution, attribute_response, build_attributions};
 /// Metadata slot recording the unit this store's timestamps were assigned in.
 const META_TIME_UNIT: &str = "dogwood_server_time_unit";
 /// Metadata slot holding the store's [`ServiceConfig`] — the service-provided,
-/// customer-independent schema half (`POLICY_INSTALL_SEMANTICS.md` §2.7).
+/// customer-independent schema half.
 const META_SERVICE_SCHEMA: &str = "dogwood_server_service_schema";
 
 /// The **store-configuration** half of the schema: the parts a service fixes
-/// once and reuses across every policy set (`POLICY_INSTALL_SEMANTICS.md` §2.7,
-/// and `dogwood_language::ServiceSchema` — "fixed once, customer-independent").
+/// once and reuses across every policy set.
 ///
 /// Held here, not in [`Installed`], because it is **immutable through the
 /// verbs**: the event schema drives relativization and the partition mode, and
 /// the macro library re-lowers every leaf, so either changing would reborn the
-/// whole set — the one genuinely reborn-all change, which §2.7 makes a
+/// whole set — the one genuinely reborn-all change, and a
 /// deliberate store rebuild rather than an everyday verb. It is set once, at the
 /// first [`install`](DurableTemporalEngine::install), and persisted in
 /// [`META_SERVICE_SCHEMA`]; a later `install` that would change it is rejected.
 ///
 /// `None` on either field means "use the built-in default"
-/// (`DEFAULT_EVENT_SCHEMA` / `DEFAULT_MACROS`). Provider declarations — the
-/// third `ServiceSchema` member — are not yet threaded through the engine and
-/// are deliberately omitted for now.
+/// (`DEFAULT_EVENT_SCHEMA` / `DEFAULT_MACROS`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct ServiceConfig {
     #[serde(default)]
@@ -90,15 +78,7 @@ struct ServiceConfig {
 /// The resolution this server assigns timestamps at, and therefore the unit its
 /// windows are compared in.
 ///
-/// Nanoseconds, matching the DSQL backend (`Dogwood_Temporal_Compiler` stores
-/// `ts` in epoch nanos). Whole seconds would be wrong here for a reason that is
-/// not obvious: `next_timestamp` clamps to `max(now, last + 1)` to keep the
-/// sequence strictly increasing, and at one-second resolution any caller
-/// submitting faster than 1/s makes the clamp fire on every event — so the
-/// sequence advances a full second per event and runs ahead of the wall clock.
-/// A burst of 3600 events would then span an "hour" of window regardless of
-/// arriving in a fraction of a second, evicting its own history and making
-/// `within 1h` mean "the last 3600 events".
+/// Nanoseconds.
 const TIME_UNIT: TickRate = TickRate::NANOS;
 
 /// Records reclaimed per prune transaction.
@@ -124,8 +104,7 @@ enum StateSource<'a> {
     /// describes and the positional restore is sound.
     Snapshot(&'a [u8]),
     /// Carry it across from whatever is running (or was last persisted), matched
-    /// by composite `(stable policy id, within-policy clause ordinal)` — the
-    /// stated-retention model of `POLICY_INSTALL_SEMANTICS.md` §2.3. The `fresh`
+    /// by composite `(stable policy id, within-policy clause ordinal)`. The `fresh`
     /// set is the ids that must **start empty** this rebuild — the fold's `Add`,
     /// `Update`, and `Reset` targets, all of `ResetAll`, none of just carrying —
     /// their entries are omitted from the carry set so their monitors keep the
@@ -138,21 +117,18 @@ enum StateSource<'a> {
 
 /// The installed policy bundle — everything needed to rebuild the authorizer.
 ///
-/// Persisted so a restart recovers the *whole* engine, not just monitor state:
-/// §7 has the server owning the policy set, which is only true across a reboot
-/// if the set is durable here rather than re-pushed by the control plane.
+/// Persisted so a restart recovers the *whole* engine, not just monitor state.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Installed {
     /// The structured policy set: each policy a stable engine-minted id plus its
-    /// canonical statement (`policy_store`). Replaces the former single
-    /// `policy: String` blob — the ids are recorded here, so recovery restores
-    /// them and never re-mints (`POLICY_INSTALL_SEMANTICS.md` §2.4).
+    /// canonical statement (`policy_store`). The ids are recorded here, so
+    /// recovery restores them and never re-mints.
     pub policies: PolicySet,
     /// The action schema (entities / actions / `appliesTo`). **Mutable** through
     /// the verbs — a `SetActionSchema` re-lowers and re-validates the whole set
-    /// (§2.7) — so it lives with the policies, not in the store-config
-    /// [`ServiceConfig`]. The event schema and macro library, being immutable
+    /// — so it lives with the policies, not in the store-config
+    /// `ServiceConfig`. The event schema and macro library, being immutable
     /// through the verbs, live there instead.
     pub action_schema: String,
 }
@@ -181,7 +157,7 @@ impl Installed {
     }
 }
 
-/// Mint a fresh opaque policy handle: `SP` (mirroring AVP's static-policy prefix)
+/// Mint a fresh opaque policy handle: `SP`
 /// followed by 22 base62 digits of 128 random bits. The 22 digits cover the full
 /// 128-bit space (62²² > 2¹²⁸), so the id is unpredictable and — at 128 bits —
 /// collision-free in practice (birthday bound ~2⁶⁴). Correctness never rests on
@@ -209,7 +185,7 @@ fn mint_policy_token() -> PolicyToken {
 
 /// Stamp a fold's [`FoldedRecord`] with the batch's single timestamp to get the
 /// durable [`Record`]. The fold already resolved every handle to its ordinal and
-/// minted the `Add` tokens, so this only attaches `ts` (§2.5 — one instant per
+/// minted the `Add` tokens, so this only attaches `ts` (one instant per
 /// batch).
 fn stamp_record(folded: &FoldedRecord, ts: i64) -> Record {
     match folded {
@@ -244,10 +220,9 @@ fn stamp_record(folded: &FoldedRecord, ts: i64) -> Record {
 }
 
 /// Fold one durable verb record into `bundle`, updating `fresh` with the ids
-/// that must start empty on the next rebuild (`POLICY_INSTALL_SEMANTICS.md`
-/// §2.6). Semantics mirror the live [`PolicySet::fold`], with two differences:
+/// that must start empty on the next rebuild. Semantics mirror the live [`PolicySet::fold`], with two differences:
 ///
-/// - Ids come from the record, so replay never re-mints (§2.4).
+/// - Ids come from the record, so replay never re-mints.
 /// - An impossible Add identity (a non-next id or duplicate live token), or an
 ///   unresolvable target (`Update`/`Delete`/`Reset` on a missing id), is a
 ///   **log-corruption** error, not a control-plane rejection: the durable log
@@ -321,7 +296,7 @@ fn apply_verb_to(
         }
         Record::AppendActionSchema { fragment, .. } => {
             // The same concatenation the live fold used, so a replay reproduces
-            // the identical merged schema (§2.7).
+            // the identical merged schema.
             bundle.action_schema = append_action_schema(&bundle.action_schema, fragment);
         }
     }
@@ -443,7 +418,7 @@ fn observed_timestamp_value(last_ts: Option<i64>, timestamp: i64) -> Option<i64>
 /// A failure serving a request.
 #[derive(Debug)]
 pub enum DurableError {
-    /// No policy set is installed yet — the control plane must `apply` first.
+    /// No policy set is installed yet; call `install` first.
     NoPolicy,
     /// The event's `(action, kind)` is not in the installed schema, or the event
     /// is otherwise unservable.
@@ -487,29 +462,13 @@ impl From<LeafStateTransferError> for DurableError {
 /// deny — even a fail-closed deny carrying evaluation errors — is recorded like
 /// any other. Hoisting it makes "accepted implies positioned" hold by
 /// construction rather than by convention.
-///
-/// It stays inside the process. The offset is the log's addressing scheme, and
-/// the data-plane peer is the policed agent (`DESIGN.md` §7.2); a client can do
-/// nothing with the value that the response's mere existence does not already
-/// tell it, while publishing it would both leak aggregate activity across all
-/// clients and freeze an internal identifier into the protocol. An operator
-/// reads the offset from [`Status`] on the privileged plane instead.
 #[derive(Debug)]
 pub struct Submitted {
     /// The log offset the event was appended at — its position in the total
     /// order, and the point its verdict was evaluated at.
-    ///
-    /// Stays in-process; see the note on [`Submitted`].
     pub offset: u64,
     /// The timestamp the store assigned, in epoch **nanoseconds** — the instant
     /// every window that ever evaluates this event is measured against.
-    ///
-    /// Unlike the offset, this one *is* told to the client. It is not an internal
-    /// identifier but a fact about the event, the caller cannot learn it any other
-    /// way (`WireEvent` carries no timestamp, deliberately, so the store's stamp
-    /// is unforgeable), and it is what a caller needs to reason about its own
-    /// history: recorded at `ts`, a `within 1h` rule stops counting it at
-    /// `ts + 1h`.
     pub ts: i64,
     /// What the caller is owed beyond the acknowledgement.
     pub outcome: Outcome,
@@ -530,48 +489,40 @@ pub enum Outcome {
 pub struct Status {
     pub rule_count: usize,
     pub leaf_count: usize,
-    /// Leaves running on the incremental path (vs. the scan fallback).
+    /// Leaves running on the incremental path.
     pub incremental_leaves: usize,
     /// The event kinds the installed schema treats as decision points.
     pub decision_kinds: Vec<String>,
-    /// The dotted paths of the schema's partition key (`DESIGN.md` §3.3), or
+    /// The dotted paths of the schema's partition key, or
     /// empty when the schema declares no universal symmetric pin and the stream
     /// therefore cannot be safely partitioned.
     pub partition_key: Vec<String>,
 }
 
-/// What an [`DurableTemporalEngine::apply`] changed, for the operator's benefit
-/// (`DESIGN.md` §9.2 — prospective installs make "which rules start cold" the
-/// thing you need to know after a policy change).
+/// What an `install` or `batch` changed, for the operator's benefit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Applied {
     /// The **last** offset the batch's records were appended at — the exact
     /// linearization boundary: events at or below it were decided under the
     /// previous set, events strictly above it under this one.
     ///
-    /// A batch is now a *set* of durable per-verb records committed in one
-    /// transaction (`POLICY_INSTALL_SEMANTICS.md` §2.6), so an apply occupies a
-    /// contiguous **range** [`first_offset`..=`offset`], not a single point.
+    /// A batch is a *set* of durable per-verb records committed in one
+    /// transaction, so an apply occupies a
+    /// contiguous **range** `first_offset..=offset`, not a single point.
     /// `offset` names the range's tail because that is where the semantic
     /// boundary is; `first_offset` is exposed for tools that need to enumerate
     /// every record the batch wrote.
-    ///
-    /// Stays in-process. An offset is only comparable to other offsets, and the
-    /// data plane no longer returns any, so a caller would hold a boundary with
-    /// nothing to apply it to. It is also per-log bookkeeping, which per-shard
-    /// logs would make locally meaningful and globally meaningless.
     pub offset: u64,
     /// The **first** offset the batch's records were appended at — the head of
     /// the contiguous range this batch occupies. Equals `offset` for a single-
-    /// verb batch. In-process only, same reason as `offset`.
+    /// verb batch.
     pub first_offset: u64,
     /// The timestamp the change record was assigned, in epoch **nanoseconds**.
     ///
-    /// This one *is* reported. `next_timestamp` is shared by `submit` and
+    /// `next_timestamp` is shared by `submit` and
     /// `apply`, so every record — event or policy change — draws from one
     /// strictly increasing sequence: the timestamp alone is a total order over
-    /// all of them. That makes it the common currency between the two planes,
-    /// since the data plane returns `recorded_at_nanos` for every event.
+    /// all of them.
     pub ts: i64,
     pub rule_count: usize,
     pub leaf_count: usize,
@@ -583,13 +534,10 @@ pub struct Applied {
 ///
 /// Deliberately narrow. The **minted handles** are the one thing a caller cannot
 /// learn any other way — they are engine-assigned (opaque, non-sequential) and
-/// returned only here (`POLICY_INSTALL_SEMANTICS.md` §2.5), so a client that
+/// returned only here, so a client that
 /// `Add`s a policy persists the returned handle to later `Update`/`Delete`/`Reset`
-/// it. The full resulting set is available via [`list`](DurableTemporalEngine::list),
-/// and the rest of an apply's summary (offsets, leaf counts) is either in-process
-/// bookkeeping or, under stated per-verb retention, no longer the surprise it
-/// was — so only `ts` is carried, the one fact an operator wants (when the batch
-/// landed, on the shared event clock). Counts are available via
+/// it. The full resulting set is available via [`list`](DurableTemporalEngine::list).
+/// Counts are available via
 /// [`status`](DurableTemporalEngine::status).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BatchResult {
@@ -600,7 +548,8 @@ pub struct BatchResult {
     /// — its position in the one order events and policy changes share.
     pub ts: i64,
     /// How many of the resulting set's leaves kept their accumulated window
-    /// across the rebuild (the transplant, §2.3) — the counterpart of
+    /// across the rebuild (the carry-over of monitor state from the previous
+    /// set) — the counterpart of
     /// [`Applied::leaves_retained`]. `0` for an empty (no-op) batch, which
     /// rebuilds nothing.
     pub leaves_retained: usize,
@@ -616,14 +565,15 @@ struct Counts {
     leaves_retained: usize,
 }
 
-/// The server's whole mutable state.
+/// The durable engine: a policy set, an event log, and the running monitor,
+/// opened at a path. See the crate documentation for a walkthrough.
 pub struct DurableTemporalEngine {
-    /// The durable event log — the source of truth (`DESIGN.md` §3).
+    /// The durable event log — the source of truth.
     log: DurableLog,
     /// The installed bundle and the authorizer built from it. `None` until the
     /// first `apply`.
     running: Option<Running>,
-    /// Snapshot the monitor state every N events (`DESIGN.md` §6.3).
+    /// Snapshot the monitor state every N events.
     snapshot_interval: u64,
     /// Events observed since the last snapshot.
     since_snapshot: u64,
@@ -632,27 +582,17 @@ pub struct DurableTemporalEngine {
     /// The highest timestamp this store has ever assigned, in epoch nanoseconds.
     /// `None` for a store that has never accepted anything.
     ///
-    /// Held here rather than read back from the log's tail on every submit. The
-    /// tail is not a reliable home for it: `checkpoint` snapshots at `next_offset`
-    /// and prunes below, so the working log is left EMPTY, and a read then finds
-    /// nothing and `max(now, last + 1)` silently degrades to `now` — dropping the
-    /// monotonicity guarantee precisely when the clock may have stepped backwards.
-    /// A timestamp below the history already folded into the snapshot corrupts
-    /// monitor state, because `Monitor`'s timeline assumes ascending order and
-    /// front-prunes with `partition_point`.
-    ///
     /// It is durable in the snapshot, whose job is to carry what resuming needs
     /// once the records are gone, and it is advanced by replay over whatever
-    /// records survive. Reading the tail would also have been the third `.ok()`
-    /// that quietly swallowed a decode failure.
+    /// records survive.
     last_ts: Option<i64>,
-    /// The store-configuration schema half — event schema + macro library
-    /// (`POLICY_INSTALL_SEMANTICS.md` §2.7). Loaded from [`META_SERVICE_SCHEMA`]
+    /// The store-configuration schema half — event schema + macro library.
+    /// Loaded from [`META_SERVICE_SCHEMA`]
     /// at `open` (default = both built-in) and set once by the first `install`;
     /// immutable through the verbs, so a batch never touches it and every
     /// `rebuild` reads it from here rather than from [`Installed`].
     service_config: ServiceConfig,
-    /// The source of assigned timestamps (`DESIGN.md` §3.3): [`WallClock`] in
+    /// The source of assigned timestamps: [`WallClock`] in
     /// production, injectable so a test can place events at exact instants or
     /// step the clock backwards. Read only through [`next_timestamp`], whose
     /// monotonic clamp is what a backwards step is held to. See [`Clock`].
@@ -677,14 +617,14 @@ struct Running {
     /// server keeps a handle rather than the frontend exposing an accessor.
     engine: SharedEngine,
     /// The set of event kinds the installed schema treats as decision points.
-    /// Read from the lowered policy set — **not** hardcoded (`DESIGN.md` §3.4).
+    /// Read from the lowered policy set — **not** hardcoded.
     decision_kinds: Vec<String>,
     rule_count: usize,
     leaf_count: usize,
     incremental_leaves: usize,
-    /// Content-derived leaf keys, in leaf order (`DESIGN.md` §9.1).
+    /// Content-derived leaf keys, in leaf order.
     leaf_keys: Vec<String>,
-    /// How this policy set's event stream may be partitioned (`DESIGN.md` §3.3),
+    /// How this policy set's event stream may be partitioned,
     /// derived from the installed schema's pins.
     shard_plan: ShardPlan,
     /// The partition key's field paths, rendered dotted, for `status`. Empty when
@@ -701,7 +641,7 @@ struct Running {
 /// one with [`new`](DurableConfig::new) — which defaults the clock to
 /// [`WallClock`] — and override the clock only in a test.
 pub struct DurableConfig {
-    /// Snapshot the monitor state every N events (`DESIGN.md` §6.3); `0` disables
+    /// Snapshot the monitor state every N events; `0` disables
     /// the event-count trigger, leaving checkpoints to the caller.
     pub snapshot_interval: u64,
     /// The timestamp source. Defaults to [`WallClock`]; a test injects its own to
@@ -852,11 +792,7 @@ impl DurableTemporalEngine {
             None => {}
         }
 
-        // NOTE: a `META_AUDIT` slot written by an older build is simply ignored —
-        // the audit trail was removed (docs/design/DURABLE_ENGINE_REFACTOR.md
-        // §5.3), so it is a harmless leftover, not something to read or refuse on.
-
-        // The store-configuration schema half (event schema + macros, §2.7). Read
+        // The store-configuration schema half (event schema + macros). Read
         // BEFORE `recover`, because rebuilding the authorizer during replay lowers
         // against it. Absent slot = never configured = both built-in defaults; a
         // malformed slot is treated as absent (the same fail-safe as an
@@ -904,14 +840,14 @@ impl DurableTemporalEngine {
     /// and pouring state into it. It starts from the policy the snapshot names —
     /// the only leaves that snapshot's state can be loaded into — and then walks
     /// the log, stepping the monitors on each event and *folding* each
-    /// policy-management verb (`POLICY_INSTALL_SEMANTICS.md` §2.6) at its own
+    /// policy-management verb at its own
     /// position in the order.
     ///
     /// The fold is **lazy** rather than per-record: a run of consecutive verbs
     /// applies only to the working bundle and the accumulated `fresh` set, and the
     /// authorizer is rebuilt just before the next event (and at end). That is
-    /// exactly what §2.6 authorizes ("consecutive verb records fold
-    /// observationally-equivalently — no intermediate state was ever observed"),
+    /// sound (consecutive verb records fold
+    /// observationally-equivalently — no intermediate state was ever observed),
     /// and it is what makes the batch grouping-agnostic: neither the live path
     /// nor recovery needs to know which verb records were one batch.
     fn recover(&mut self) -> Result<(), DurableError> {
@@ -959,7 +895,7 @@ impl DurableTemporalEngine {
                     restored = true;
                 }
                 Err(e) if base == 0 => {
-                    // Surface the degrade (review N1): a refused snapshot
+                    // Surface the degrade: a refused snapshot
                     // forces a full-log replay on EVERY restart until the
                     // next checkpoint supersedes it — invisible without
                     // this line. (The library has no logger; stderr is
@@ -970,8 +906,7 @@ impl DurableTemporalEngine {
                     );
                     // The snapshot refused (format/mode change across an
                     // upgrade) but the FULL log is still present: degrade to
-                    // complete replay — correct, slower, and exactly the
-                    // documented migration path (PARTITION_DESIGN.md §4.2).
+                    // complete replay — correct, slower.
                     // The stale snapshot is superseded on the next
                     // checkpoint.
                     restored = false;
@@ -1006,13 +941,11 @@ impl DurableTemporalEngine {
     ///
     /// `restored` says whether monitor state was already established (from the
     /// snapshot). When it was, events advance the monitors only
-    /// (`step_monitors`): the retained trace is not snapshotted, and a transplant
-    /// does not carry one either, so there is no trace to extend. From a cold
-    /// start the trace is rebuilt too.
+    /// (`step_monitors`).
     ///
     /// Verbs never rebuild eagerly: the authorizer is rebuilt only when an
     /// event needs it (or at end, if the log ends on a verb). This is the
-    /// grouping-agnostic replay §2.6 relies on — a run of verb records folds the
+    /// grouping-agnostic replay — a run of verb records folds the
     /// same whether it was one batch or several.
     fn replay_from(&mut self, from: u64, restored: bool) -> Result<(), DurableError> {
         let replay_floor = self.last_ts;
@@ -1054,8 +987,6 @@ impl DurableTemporalEngine {
             this.running = Some(running);
             pending_fresh.clear();
             *pending_dirty = false;
-            // A transplant establishes monitor state without a trace: from now
-            // on, replayed events advance monitors incrementally.
             *restored = true;
             Ok(())
         };
@@ -1178,9 +1109,7 @@ impl DurableTemporalEngine {
 
     /// A status projection of the running set.
     /// The temporal engine's live shard count (0 when global / nothing
-    /// running) — the observable that PINS partitioned mode being active
-    /// (verdicts cannot: the relativization theorem makes the modes
-    /// verdict-equivalent by design).
+    /// running) — the observable that PINS partitioned mode being active.
     #[doc(hidden)]
     pub fn temporal_shard_count(&self) -> usize {
         self.running
@@ -1207,18 +1136,12 @@ impl DurableTemporalEngine {
         &self.path
     }
 
-    /// How this policy set's event stream may be partitioned (`DESIGN.md` §3.3).
+    /// How this policy set's event stream may be partitioned.
     ///
     /// This is the **routing seam** for pin-sharded parallelism: a multi-instance
     /// server computes `plan.key_of(event)` and routes to the instance owning that
     /// key, which is sound precisely because a shardable plan means the frontend
-    /// rewrote the formulas for key-local evaluation (see [`crate::shard`]).
-    ///
-    /// Today's server runs a single instance and therefore does not *need* to
-    /// route — but the plan is derived, reported by `status`, and tested, so the
-    /// property a deployment depends on ("is this policy set partitionable, and on
-    /// what key?") is an observable fact rather than something to rediscover when
-    /// the second instance is added.
+    /// rewrote the formulas for key-local evaluation.
     pub fn shard_plan(&self) -> ShardPlan {
         self.running
             .as_ref()
@@ -1228,7 +1151,7 @@ impl DurableTemporalEngine {
 
     // ─── The data plane ──────────────────────────────────────────────
 
-    /// Submit one event: the single schema-driven primitive (`DESIGN.md` §10).
+    /// Submit one event: the single schema-driven primitive.
     ///
     /// The order of operations is the load-bearing part. The event is **durably
     /// appended first**, then stepped into the monitor, then (for a decision
@@ -1241,7 +1164,7 @@ impl DurableTemporalEngine {
     /// than proceeding in memory.
     ///
     /// The timestamp is assigned **here**, at the append point, never taken from
-    /// the caller (`DESIGN.md` §3.3), and clamped strictly above the previous
+    /// the caller, and clamped strictly above the previous
     /// event's so the per-instance order the temporal operators require holds
     /// even if the wall clock steps backwards.
     ///
@@ -1251,8 +1174,7 @@ impl DurableTemporalEngine {
     /// clock, so it stamps the builder with the timestamp it just assigned and
     /// then builds it. This keeps the stamp unforgeable — the engine's
     /// `.timestamp(..)` is the last one applied, so it overrides anything a
-    /// caller set — while letting the wire→event mapping stay in the server
-    /// (where `WireEvent` lives). The builder is finalized exactly once, only
+    /// caller set. The builder is finalized exactly once, only
     /// after a policy set is confirmed installed.
     pub fn submit(&mut self, event: EventBuilder) -> Result<Submitted, DurableError> {
         if self.running.is_none() {
@@ -1285,7 +1207,7 @@ impl DurableTemporalEngine {
             .is_authorized(&event)
             .map(|response| attribute_response(&response, &running.attributions));
 
-        // 3. Periodic snapshot (§6.3's event-count trigger). Best-effort: a
+        // 3. Periodic snapshot (the event-count trigger). Best-effort: a
         //    failed checkpoint costs replay depth, never correctness.
         self.since_snapshot += 1;
         if self.snapshot_interval != 0 && self.since_snapshot >= self.snapshot_interval {
@@ -1333,19 +1255,8 @@ impl DurableTemporalEngine {
     /// The timestamp to assign the next event, in epoch **nanoseconds**:
     /// `max(now, last + 1)`.
     ///
-    /// Mirrors the DSQL backend, which stores `ts` in epoch nanos and clamps with
-    /// `GREATEST((EXTRACT(EPOCH FROM NOW()) * 1000000000)::BIGINT, ts + 1)`
-    /// (`Dogwood_Temporal_Compiler`'s `cte_monitor_insert`) — the same expression
-    /// in the same unit, so the two backends assign time alike.
-    ///
     /// The clamp guarantees strict increase, which window eviction and `previous`
-    /// both depend on. The *resolution* is what keeps that guarantee cheap: at
-    /// whole seconds the clamp fires on every event of any burst faster than 1/s,
-    /// so the sequence advances a full second per event and runs ahead of the wall
-    /// clock — 3600 events would span an entire `within 1h` window however
-    /// quickly they arrived, evicting their own history and quietly redefining an
-    /// hour as "the last 3600 events". At nanosecond resolution real elapsed time
-    /// dominates and the clamp is a tie-breaker rather than a clock.
+    /// both depend on.
     fn next_timestamp(&self) -> Result<i64, DurableError> {
         let now = self.clock.now_nanos();
         let allowed = i128::try_from(self.max_future_skew.as_nanos()).unwrap_or(i128::MAX);
@@ -1383,13 +1294,13 @@ impl DurableTemporalEngine {
     /// one-policy-per-entry sets instead, so this is only reachable through them.
     ///
     /// Semantics are **reborn-all**, not prospective: this models
-    /// `[SetActionSchema; DeleteAll; Add each]` (`POLICY_INSTALL_SEMANTICS.md`
-    /// §2.1/§2.8 — the declarative path wipes and rebuilds, so *every* resulting
+    /// `[SetActionSchema; DeleteAll; Add each]` (the declarative path wipes and
+    /// rebuilds, so *every* resulting
     /// policy is born fresh with an empty window). To *keep* unchanged policies'
     /// history, use `batch` with targeted verbs, which leaves unmentioned
-    /// policies untouched (§2.2); this method deliberately does not.
+    /// policies untouched; this method deliberately does not.
     ///
-    /// Two non-negotiables from `DESIGN.md` §8, both realized here:
+    /// Two non-negotiables, both realized here:
     ///
     /// - **Validate server-side.** The bundle is parsed, lowered, and
     ///   type-checked *here*, against the installed schema, before anything is
@@ -1400,12 +1311,12 @@ impl DurableTemporalEngine {
     ///   decision never runs against a half-applied set and a rejected install
     ///   leaves the running set serving.
     ///
-    /// The event schema / macros are store config (§2.7), not part of this
+    /// The event schema / macros are store config, not part of this
     /// stream — it uses whatever the store was configured with and never changes
     /// them. `service_config_bytes` is the encoded [`ServiceConfig`] to persist
     /// in this same transaction on a *first* install (`None` otherwise); folding
     /// it into the record commit keeps a rejected install from stranding a durable
-    /// config write (Finding 1 / §2.7).
+    /// config write.
     fn apply(
         &mut self,
         installed: Installed,
@@ -1417,10 +1328,10 @@ impl DurableTemporalEngine {
         // set (reborn-all).
         //
         // A batch is one atomic transaction — "sequential in meaning, transactional
-        // in effect" (§2.5) — so every record shares the batch's single timestamp
+        // in effect" — so every record shares the batch's single timestamp
         // `now`, the same value `install_configured` stamped each entry's
         // `created`/`updated` with. Their order within the batch is carried by the
-        // log **offset** (records occupy contiguous offsets, §2.6), not by the
+        // log **offset** (records occupy contiguous offsets), not by the
         // timestamp, so the timestamps need not advance. Sharing one `now` is what
         // makes the running set and its post-recovery rebuild agree: replay stamps
         // each entry from its record's `ts`, which is `now` for all of them.
@@ -1456,7 +1367,7 @@ impl DurableTemporalEngine {
     /// id.
     ///
     /// This is also the **store-configuration** entry point: the event schema and
-    /// macro library (§2.7) are set here, once. Both are immutable through the
+    /// macro library are set here, once. Both are immutable through the
     /// verbs, so a later `install` that would *change* either is **rejected** —
     /// changing them reborns the whole set and is a deliberate store rebuild
     /// (open a fresh store), not an everyday operation. Passing `None` uses the
@@ -1474,7 +1385,7 @@ impl DurableTemporalEngine {
         // (`apply` → `commit_and_swap`), so a policy that fails to canonicalize or
         // validate below leaves the store untouched — the event schema is not
         // locked in by a rejected install, and there is no separate transaction a
-        // crash could strand (`POLICY_INSTALL_SEMANTICS.md` §2.7; matches the
+        // crash could strand (matches the
         // batch "a rejected change writes nothing" rule).
         let (desired_config, config_bytes) = self.plan_service_config(event_schema, macros)?;
         // Adopt in memory up front, because `rebuild` lowers the policy against
@@ -1507,10 +1418,10 @@ impl DurableTemporalEngine {
         let statements = Self::canonicalize_source(policy_source, &service)
             .map_err(|e| DurableError::Rejected(format!("policy: {e}")))?;
         let now = self.next_timestamp()?;
-        // A re-install is `[DeleteAll; Add each]` (§2.8): it wipes the set but
+        // A re-install is `[DeleteAll; Add each]`: it wipes the set but
         // must *continue* the id cursor, never restart it — otherwise a fresh
         // policy could reuse an id a caller still holds for a since-deleted one
-        // (§2.4). Seed from the running set's cursor (0 on a first install).
+        // Seed from the running set's cursor (0 on a first install).
         let next_id = self
             .running
             .as_ref()
@@ -1522,12 +1433,12 @@ impl DurableTemporalEngine {
             action_schema: action_schema.to_string(),
         };
         // The entries above are stamped `now`; `apply` stamps every record with the
-        // same `now`, so the batch is one instant end to end (Option A / §2.5).
+        // same `now`, so the batch is one instant end to end.
         self.apply(installed, now, config_bytes)
     }
 
     /// Decide the store's service configuration — the event schema and macro
-    /// library (§2.7) — without persisting anything. Returns the config to adopt
+    /// library — without persisting anything. Returns the config to adopt
     /// and, on the *first* configuration, the encoded bytes to persist (`None`
     /// when a config is already established, so nothing needs writing).
     ///
@@ -1535,7 +1446,7 @@ impl DurableTemporalEngine {
     /// rejected. `None` means "the built-in default", and re-affirming the same
     /// config is a no-op. Deliberately does **not** commit: the caller folds the
     /// returned bytes into the same transaction as the policy records, so a
-    /// rejected install leaves the config unwritten (Finding 1 / §2.7).
+    /// rejected install leaves the config unwritten.
     fn plan_service_config(
         &self,
         event_schema: Option<&str>,
@@ -1573,7 +1484,7 @@ impl DurableTemporalEngine {
         Ok((desired, Some(bytes)))
     }
 
-    /// Apply a batch of policy verbs atomically over the current set (§2.1).
+    /// Apply a batch of policy verbs atomically over the current set.
     /// The event schema is fixed; a `SetActionSchema` verb re-lowers the whole
     /// set. Rejected as a unit if any verb is invalid — the running set is
     /// untouched. Requires a prior [`install`](Self::install) (the schemas come
@@ -1581,7 +1492,7 @@ impl DurableTemporalEngine {
     ///
     /// The fold happens on a working copy; only the resulting `Installed`
     /// validates and only the resulting run of records commits. Each verb is
-    /// its own durable record (no `Batch` wrapper — §2.6), so replay is
+    /// its own durable record (no `Batch` wrapper), so replay is
     /// grouping-agnostic.
     pub fn batch(&mut self, verbs: Vec<Verb>) -> Result<BatchResult, DurableError> {
         // An empty batch is a no-op: return without rebuilding the authorizer,
@@ -1601,7 +1512,7 @@ impl DurableTemporalEngine {
             .ok_or(DurableError::NoPolicy)?
             .installed
             .clone();
-        // The event schema / macros are store config (§2.7), immutable through
+        // The event schema / macros are store config, immutable through
         // the verbs — so the batch lowers against the store's fixed service
         // config, never anything carried in the bundle.
         let service = Self::build_service(&self.service_config)?;
@@ -1634,9 +1545,9 @@ impl DurableTemporalEngine {
         // The fold already produced the ordered durable effects — including the
         // random `Add` handles a second pass could not reproduce — so we only
         // stamp each with the batch's single timestamp `now`. A batch is atomic
-        // ("sequential in meaning, transactional in effect", §2.5), so it is one
+        // ("sequential in meaning, transactional in effect"), so it is one
         // instant; the records' order within it is carried by the log **offset**
-        // (contiguous, §2.6), not the timestamp. Sharing one `now` is what keeps
+        // (contiguous), not the timestamp. Sharing one `now` is what keeps
         // the running set and its post-recovery rebuild identical.
         //
         // `now` is *observed* inside `commit_and_swap`, only after the log accepts
@@ -1650,7 +1561,7 @@ impl DurableTemporalEngine {
             .map(|r| stamp_record(r, now).encode())
             .collect();
 
-        // A batch never touches store config (§2.7 — event schema/macros are
+        // A batch never touches store config (event schema/macros are
         // fixed at the first install), so no config bytes ride along.
         let applied = self.commit_and_swap(records, &installed, &outcome.fresh, now, None)?;
         Ok(BatchResult {
@@ -1664,7 +1575,7 @@ impl DurableTemporalEngine {
     /// the running set (skipping the ids in `fresh`), atomically commit the
     /// prepared record bytes, and swap the running set in on success.
     ///
-    /// Rebuild-then-commit is the load-bearing order: the authorizer is proven
+    /// Rebuild-then-commit is the load-bearing order: the authorizer is shown
     /// buildable and validatable *before* any record is durable, and the running
     /// set is only swapped *after* the log has accepted the whole batch — so a
     /// crash between the two either preserves the old set (commit not reached)
@@ -1688,7 +1599,7 @@ impl DurableTemporalEngine {
         // On a first install, the store's service config is written in this same
         // transaction as the records it configures — all-or-nothing, so a crash
         // or a validation failure can never leave the config set without the set
-        // it belongs to (Finding 1 / §2.7). `Meta` writes take no log offset, so
+        // it belongs to. `Meta` writes take no log offset, so
         // the `first`/`last` offset arithmetic below is unaffected.
         if let Some(bytes) = service_config_bytes {
             writes.push(Write::Meta {
@@ -1728,7 +1639,7 @@ impl DurableTemporalEngine {
         })
     }
 
-    /// The installed policies in order — an owned snapshot (`list`, §2.1).
+    /// The installed policies in order — an owned snapshot.
     pub fn list(&self) -> Vec<PolicyEntry> {
         self.running
             .as_ref()
@@ -1736,7 +1647,7 @@ impl DurableTemporalEngine {
             .unwrap_or_default()
     }
 
-    /// One policy's full entry by its handle (`GetPolicy`, §2.1).
+    /// One policy's full entry by its handle.
     pub fn get_policy(&self, token: &PolicyToken) -> Option<PolicyEntry> {
         self.running
             .as_ref()
@@ -1744,7 +1655,7 @@ impl DurableTemporalEngine {
     }
 
     /// The running set's action schema — the **original** the operator authored,
-    /// not the augmented one lowering derives (`GetSchema`, §2.7). `None` when no
+    /// not the augmented one lowering derives. `None` when no
     /// policy set is installed.
     pub fn action_schema(&self) -> Option<String> {
         self.running
@@ -1752,7 +1663,7 @@ impl DurableTemporalEngine {
             .map(|r| r.installed.action_schema.clone())
     }
 
-    /// The store's configured event schema (`GetSchema`, §2.7). `None` means the
+    /// The store's configured event schema. `None` means the
     /// built-in default (`DEFAULT_EVENT_SCHEMA`) is in force — the operator
     /// authored no override. This is store configuration, so it is available even
     /// before a policy set is installed.
@@ -1761,7 +1672,7 @@ impl DurableTemporalEngine {
     }
 
     /// Build the parsing service from the store's fixed [`ServiceConfig`] — the
-    /// event schema and macro library (§2.7). Each `None` field uses the
+    /// event schema and macro library. Each `None` field uses the
     /// frontend's built-in default (`DEFAULT_EVENT_SCHEMA` / `DEFAULT_MACROS`).
     fn build_service(config: &ServiceConfig) -> Result<ServiceSchema, DurableError> {
         let mut b = ServiceSchema::builder();
@@ -1807,17 +1718,6 @@ impl DurableTemporalEngine {
     }
 
     /// Build (or rebuild) the authorizer from `installed`.
-    ///
-    /// `recovering` distinguishes the two callers, which need different state
-    /// sources:
-    ///
-    /// - **recovery** (server start): load the positional snapshot and replay the
-    ///   post-snapshot log tail, exactly as `DurableTemporalEngine` does — the
-    ///   leaves are identical to those the snapshot was taken from, so position
-    ///   is a valid key.
-    /// - **apply** (policy change): the leaf list is *changing*, so position is
-    ///   meaningless; transplant by content identity instead (§9.1) and replay
-    ///   nothing.
     fn rebuild(
         &mut self,
         installed: &Installed,
@@ -1826,7 +1726,7 @@ impl DurableTemporalEngine {
         // Lower and validate. Any failure here is a rejection that leaves the
         // running set untouched (nothing below has mutated `self.running` yet).
         // The service schema (event schema + macros) is store config, held on
-        // `self`, not carried in the bundle (§2.7).
+        // `self`, not carried in the bundle.
         let service = Self::build_service(&self.service_config)?;
         let policy_schema = PolicySchema::from_cedarschema_str(&installed.action_schema)
             .map_err(|e| DurableError::Rejected(format!("action schema: {e}")))?;
@@ -1851,11 +1751,11 @@ impl DurableTemporalEngine {
         let attributions =
             build_attributions(lowered.rules(), lowered.as_cedar(), &installed.policies)?;
         let rule_count = lowered.rules().count();
-        // NATIVE PIN PARTITIONING, auto-enabled by the schema's pins
-        // (docs/design/PARTITION_DESIGN.md §4.1): with universal
+        // NATIVE PIN PARTITIONING, auto-enabled by the schema's pins:
+        // with universal
         // symmetric pins declared, the engine runs one monitor shard
         // per pin value over the NON-relativized leaves — same verdicts
-        // as the relativization rewrite (the frontend's theorem), flat
+        // as the relativization rewrite, flat
         // per-key evaluation, and stale-key reclamation. Without pins
         // the two leaf sets coincide and the engine runs global.
         let partitioned = !lowered.partition_keys().is_empty();
@@ -1867,16 +1767,15 @@ impl DurableTemporalEngine {
         let leaf_count = leaves.len();
         let decision_kinds: Vec<String> = lowered.decision_kinds().map(String::from).collect();
         let schema = lowered.cedar_schema().clone();
-        // Whether this schema's event stream may be partitioned (`DESIGN.md`
-        // §3.3). Derived from the schema's declared pins, so it changes with the
+        // Whether this schema's event stream may be partitioned.
+        // Derived from the schema's declared pins, so it changes with the
         // policy set — a schema edit that drops the universal pin makes the stream
         // unshardable from that apply forward.
         let shard_plan = ShardPlan::from_policies(&lowered);
 
         // The declared signature of every event the policy set can see. The
         // local engine interprets rather than compiles, so it does not use
-        // these — but the trait requires them, and a compiling engine dropped in
-        // behind this seam would.
+        // these — but the trait requires them.
         let event_signatures: Vec<_> = lowered.event_signatures().collect();
 
         // Prepare a fresh engine over the new leaves, then give it state.
@@ -1892,7 +1791,7 @@ impl DurableTemporalEngine {
 
         // Feed the engine the validated id ↔ source-position map so
         // `save_keyed_state` / `share_leaf_state` key by
-        // `(policy id, clause ordinal)` (§2.3).
+        // `(policy id, clause ordinal)`.
         engine.set_policy_ids(&policy_ids);
 
         let leaves_retained = match source {
@@ -1903,12 +1802,7 @@ impl DurableTemporalEngine {
                     engine.incremental_leaf_count()
                 } else {
                     // A PRESENT snapshot that refuses to load (format
-                    // change, mode change, corruption). Swallowing this as
-                    // 0 was review F1's critical: the caller marks the
-                    // state restored and replays only post-snapshot
-                    // records — but the pre-snapshot log is PRUNED, so the
-                    // history silently vanishes and history-gated forbids
-                    // stop firing. Surface it; recover() decides whether
+                    // change, mode change, corruption). Surface it; recover() decides whether
                     // the log can still cover the gap.
                     return Err(DurableError::Log(
                         "snapshot present but refused by the engine \
@@ -1967,7 +1861,7 @@ impl DurableTemporalEngine {
     }
 
     /// Policy-change path: transplant state into the new leaves by composite
-    /// `(policy id, clause ordinal)` (`POLICY_INSTALL_SEMANTICS.md` §2.3), so
+    /// `(policy id, clause ordinal)`, so
     /// unchanged policies keep their windows and policies in `fresh` (Add /
     /// Update / Reset / all of ResetAll) start empty. Returns how many leaves
     /// kept their state.
@@ -1994,7 +1888,7 @@ impl DurableTemporalEngine {
         }
 
         if let Some(running) = &self.running {
-            // MODE MATRIX (native partitioning, PARTITION_DESIGN.md §4):
+            // MODE MATRIX (native partitioning):
             // the Arc fast path (share/adopt) exists only for global↔global.
             // Any cell involving a partitioned engine goes through the
             // KEYED-STATE path, whose per-entry pin-set fingerprint makes
@@ -2041,8 +1935,8 @@ impl DurableTemporalEngine {
 
     // ─── Checkpointing ───────────────────────────────────────────────
 
-    /// Snapshot the monitor state now and prune the working log below it
-    /// (`DESIGN.md` §6.3). The positional snapshot names its policy bundle, so
+    /// Snapshot the monitor state now and prune the working log below it.
+    /// The positional snapshot names its policy bundle, so
     /// recovery restores it only into the identical leaf order. Policy changes
     /// after recovery transplant from that restored live engine.
     pub fn checkpoint(&mut self) -> Result<u64, DurableError> {
@@ -2084,7 +1978,7 @@ impl DurableTemporalEngine {
         Ok(up_to)
     }
 
-    /// The content-derived identities of the installed leaves (§9.1), for
+    /// The content-derived identities of the installed leaves, for
     /// diagnostics.
     pub fn leaf_keys(&self) -> Vec<String> {
         self.running

@@ -1,4 +1,4 @@
-//! Native pin partitioning — the battery (docs/design/PARTITION_DESIGN.md §6).
+//! Native pin partitioning — the battery.
 //!
 //! THREE-LANE DISCIPLINE: every semantic test drives
 //!   (1) the native-sharded local engine (non-relativized leaves +
@@ -869,7 +869,7 @@ fn p22_lifecycle_noops() {
     drop(nat);
 }
 
-// ── snapshot format v2 (PARTITION_DESIGN.md §4.3) ───────────────────────
+// ── snapshot format v2 ───────────────────────
 
 /// P23: the partitioned snapshot round-trip — warm shards (incl. warm
 /// memos), save, load into a freshly prepared engine, and continue the

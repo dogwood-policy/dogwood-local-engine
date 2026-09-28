@@ -1,12 +1,11 @@
-//! Native pin partitioning: one monitor shard per pin value
-//! (docs/design/PARTITION_DESIGN.md).
+//! Native pin partitioning: one monitor shard per pin value.
 //!
 //! The routing contract delegates value encoding to the reference interpreter's
 //! [`dogwood_language::partition_value_key`] — two events share a shard iff the
 //! oracle would route them to one trace. The three-lane battery in
 //! `tests/partition.rs` referees the integration end-to-end.
 //!
-//! The stale-shard sweep implements the design's full-expiry theorem: a
+//! The stale-shard sweep: a
 //! shard whose last event predates `global_now − max_window` is
 //! indistinguishable from a deleted one (its next `step` would prune
 //! everything it retains), so it is dropped wholesale — with BOUNDED
@@ -27,7 +26,7 @@ use crate::sync::mpsc::Sender;
 const SWEEP_POPS_PER_OBSERVE: usize = 8;
 
 /// Encode one event's partition-key tuple to a stable string — the
-/// oracle's routing function, ported verbatim. Reads each key's LOGGED
+/// oracle's routing function. Reads each key's LOGGED
 /// field (what μ-matching reads); absent → a distinct `<none>` marker;
 /// multi-key joined with the unit separator.
 pub(crate) fn partition_value_of(event: &Event, keys: &[PartitionKey]) -> String {
@@ -112,8 +111,8 @@ impl ShardedMonitor {
         self.sweep(now, SWEEP_POPS_PER_OBSERVE, dropper);
     }
 
-    /// Pop up to `budget` fully-expired shards (the full-expiry theorem:
-    /// last event older than `now − retention` ⇒ deletion is
+    /// Pop up to `budget` fully-expired shards (last event older than
+    /// `now − retention` ⇒ deletion is
     /// indistinguishable from keeping). `i64::MAX` retention never
     /// expires anything — correct: that history stays reachable.
     pub(crate) fn sweep(&mut self, now: i64, budget: usize, dropper: Option<&Sender<Monitor>>) {
@@ -152,7 +151,7 @@ impl ShardedMonitor {
     }
 
     /// The pin's shard's verdict. A pin with no shard (never observed,
-    /// or swept) is an EMPTY monitor by the full-expiry theorem — but
+    /// or swept) is an EMPTY monitor — but
     /// `evaluate` always follows an `observe` that routed the decision
     /// into its shard, so this is only reachable for foreign pins.
     pub(crate) fn verdict(&self, decision: &Event, pin: &str) -> bool {
@@ -173,7 +172,7 @@ impl ShardedMonitor {
     }
 
     /// Serialize the LIVE shards (sweep-before-save as a WRITE FILTER:
-    /// fully-expired shards are deletable by the full-expiry theorem,
+    /// fully-expired shards are deletable,
     /// so they are simply not written — the save stays `&self`).
     /// Format: shard count, then per shard (pin len, pin bytes,
     /// monitor len, monitor bytes) — the monitor encoding is
@@ -215,10 +214,10 @@ impl ShardedMonitor {
             *p = end;
             Some(v)
         };
-        // SCRATCH-THEN-SWAP (review F4): parse into fresh maps and install only
+        // SCRATCH-THEN-SWAP: parse into fresh maps and install only
         // after the complete input slice is consumed, so corruption or trailing
-        // bytes leave the live state untouched. Bounds via checked_add (review
-        // F3): corrupt input degrades, never panics.
+        // bytes leave the live state untouched. Bounds via checked_add:
+        // corrupt input degrades, never panics.
         let mut shards = HashMap::new();
         let mut by_staleness = BTreeMap::new();
         let mut last_ts = HashMap::new();
@@ -296,8 +295,7 @@ fn retire<T>(value: T, dropper: Option<&Sender<T>>) {
 
 #[cfg(test)]
 mod routing_tests {
-    //! The port-fidelity pins the design mandates (PARTITION_DESIGN.md
-    //! §1): the routing encodings the integration battery's entity-only
+    //! The routing encodings the integration battery's entity-only
     //! pins cannot reach. Each case mirrors the oracle's semantics.
 
     use dogwood_language::{Value, partition_value_key};

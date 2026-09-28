@@ -1,4 +1,4 @@
-//! The aggregate-memo battery (MEMO_DESIGN.md §5). Layers:
+//! The aggregate-memo battery. Layers:
 //!
 //! PRECONDITIONS (green BEFORE the memo lands — if red, the memo's
 //! soundness premises are broken and that is a pre-existing engine bug):
@@ -639,7 +639,7 @@ fn u11_kill_switch() {
 }
 
 // ── S1: the wide differential (subset in CI; the full 29-case battery
-//    runs via the bench harness — see MEMO_DESIGN.md S1) ───────────────
+//    runs via the bench harness) ───────────────
 
 /// S1 (CI slice): the four agg policies × the sweep trace, three-lane.
 #[test]

@@ -1,15 +1,15 @@
 //! **Content-derived leaf identity** — the stable name a temporal leaf's
-//! derived monitor state is filed under (`DESIGN.md` §9.1).
+//! derived monitor state is filed under.
 //!
 //! # Why positional identity is not enough
 //!
-//! Prospective installs (`DESIGN.md` §9) require that installing rule B leaves
+//! Prospective installs require that installing rule B leaves
 //! rule A's accumulated window *untouched*. A policy change recompiles the whole
 //! set, and a leaf's public id ([`TemporalField::id`]) is **positional** —
 //! `__temporal_0`, `__temporal_1`, … assigned in hoist order. Insert a rule
 //! ahead of an existing one and every subsequent leaf's id shifts, so
 //! state filed under `__temporal_1` would be handed to a *different* formula.
-//! That is the invisible bug §9.1 calls out: adding an unrelated rule silently
+//! That is the invisible bug: adding an unrelated rule silently
 //! resets (or worse, cross-contaminates) every existing rule's history.
 //!
 //! So state is keyed by **what the leaf says, not where it sits**: a canonical,
@@ -35,7 +35,7 @@
 //! - **Semantics-canonical where cheap.** `within 1m` and `within 60s` denote
 //!   the same window, so both render as `w:60` and keep their shared state
 //!   across such an edit. (The converse — a *widened* window, `1h` → `24h` —
-//!   deliberately yields a different key: §9.2's "editing a temporal rule resets
+//!   deliberately yields a different key: "editing a temporal rule resets
 //!   its window", since prospectivity cannot conjure history that was never
 //!   retained.)
 //!
@@ -49,7 +49,7 @@ use dogwood_language::temporal_ast::{
 
 /// The content-derived identity of a temporal leaf: a canonical, span-free
 /// rendering of its condition. Equal keys ⇒ the same formula ⇒ state may be
-/// carried across a recompile (`DESIGN.md` §9.1).
+/// carried across a recompile.
 pub fn leaf_key(leaf: &TemporalField) -> String {
     let mut out = String::new();
     render_condition(&leaf.condition.condition, &mut out);
@@ -329,11 +329,11 @@ fn render_agg(agg: &AggExpr, out: &mut String) {
     }
 }
 
-// NOTE: like `reach.rs`, this module operates on a `temporal_ast::Condition`
+// NOTE: this module operates on a `temporal_ast::Condition`
 // whose `span` field carries a crate-private type that cannot be constructed
 // outside `dogwood-language` — so a `Condition` cannot be hand-built in an
 // out-of-crate unit test. `leaf_key` is instead exercised end-to-end over real,
 // parsed policies by `tests/leaf_identity.rs`, which asserts the properties that
 // actually matter: distinct formulas get distinct keys, a reformatted /
 // reordered policy set keeps each leaf's key (so state survives), and a widened
-// window changes it (so state resets, per §9.2).
+// window changes it (so state resets).

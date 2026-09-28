@@ -5,7 +5,7 @@ edition = "2024"
 # A binary crate: it produces the `dogwood-server` executable (the server and
 # its control-plane subcommands), not a library artifact other packages consume.
 publish = false
-description = "The Dogwood server (`dogwood-server`): a local service that owns the policy set and durable event log behind a process boundary, exposing a submit wire API over a Unix socket plus a privileged control plane. Builds on `dogwood-local-engine`."
+description = "A demo service that puts dogwood-local-engine behind Unix sockets with a separate control plane. Not for production use."
 exclude = ["/build", "/Config", "/build-tools/"]
 
 # A library plus a thin binary over it. The library is what the integration
@@ -32,7 +32,7 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Unix peer-credential attestation (`SO_PEERCRED`) plus `getuid` — the kernel
-# half of the trust boundary (DESIGN.md §7.2, §8.1). A thin, pure-Rust syscall
+# half of the trust boundary. A thin, pure-Rust syscall
 # wrapper, already in the dependency graph via `clap`'s `terminal_size`.
 rustix = { version = "1", features = ["net", "process"] }
 
@@ -54,13 +54,13 @@ path = "tests/server_e2e.rs"
 
 # Pin-sharded partitioning: that a partition key is derived when — and only when —
 # the schema makes partitioning sound, and that routing groups exactly the events a
-# policy must correlate (DESIGN.md §3.3).
+# policy must correlate.
 [[test]]
 name = "shard_routing"
 path = "tests/shard_routing.rs"
 
 # The durable-engine tests moved to the engine crate with the assembly they
-# exercise (docs/design/DURABLE_ENGINE_REFACTOR.md step 2), each now driving
+# exercise, each now driving
 # `DurableTemporalEngine` directly (the `ServerState` newtype is gone):
 #   - submit_contract   (the sequencer's offset/timestamp contract)
 #   - store_invariants   (log-shape/durability invariants + the shared harness)

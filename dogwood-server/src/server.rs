@@ -2,7 +2,7 @@
 //!
 //! # The two sockets ARE the boundary
 //!
-//! `DESIGN.md` §8.1 puts the control plane on a **separate** socket from the data
+//! The control plane is on a **separate** socket from the data
 //! path, and that separation is what makes the "agent has no policy verb"
 //! guarantee structural rather than procedural. Three layers enforce it, and the
 //! redundancy is deliberate — each catches what the others cannot:
@@ -11,7 +11,7 @@
 //!    lower-privileged uid cannot even `connect()`. The OS refuses before a byte
 //!    is exchanged.
 //! 2. **Peer-credential uid allowlist.** Every control connection's uid is
-//!    checked against the allowlist (§8.1). This is what still holds if the
+//!    checked against the allowlist. This is what still holds if the
 //!    socket's mode is wrong — a misconfigured deployment degrades to
 //!    "authenticated" rather than to "open".
 //! 3. **Type-level verb separation.** The data socket deserializes
@@ -22,7 +22,7 @@
 //! # Threading
 //!
 //! A thread per connection, each briefly taking the state mutex. This suits the
-//! expected load — §3.3 anticipates many concurrent decision callers (an agent
+//! expected load — many concurrent decision callers (an agent
 //! spawning sub-agents), each of which does one small blocking round trip — and
 //! it keeps the append point the single linearization point the timestamp model
 //! requires. A thread pool would bound thread count under pathological
@@ -78,7 +78,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 ///
 /// # The layout is the permission model
 ///
-/// §7's privilege asymmetry has to be expressible in file modes, and a single
+/// The privilege asymmetry has to be expressible in file modes, and a single
 /// flat directory cannot express it: the state directory must be **unreachable**
 /// by the agent (it holds the policy set and the log), while the data socket must
 /// be **reachable** by the agent — and on Linux, connecting to a Unix socket
@@ -162,7 +162,7 @@ impl Server {
         std::fs::create_dir_all(&paths.dir)
             .map_err(|e| format!("create {}: {e}", paths.dir.display()))?;
         // The state directory holds the policy set, the log, and the control
-        // socket; only the server's own uid has any business in it (§7's
+        // socket; only the server's own uid has any business in it (the
         // privilege asymmetry). Set the mode explicitly rather than relying on
         // umask, which a caller's environment controls.
         std::fs::set_permissions(&paths.dir, std::fs::Permissions::from_mode(0o700))
@@ -203,8 +203,8 @@ impl Server {
 
     /// Bind both sockets and serve until shutdown.
     ///
-    /// On a clean stop the state is checkpointed unconditionally (`DESIGN.md`
-    /// §6.3), so a normal restart replays ≈nothing.
+    /// On a clean stop the state is checkpointed unconditionally,
+    /// so a normal restart replays ≈nothing.
     pub fn serve(&self) -> Result<(), String> {
         // `0666` on the data socket: a connect() needs write permission, and the
         // agent runs as a different uid by design. What protects this socket is
@@ -240,7 +240,7 @@ impl Server {
         let _ = data_thread.join();
         let _ = control_thread.join();
 
-        // Clean-shutdown checkpoint (§6.3).
+        // Clean-shutdown checkpoint.
         if let Ok(mut state) = self.state.lock() {
             let _ = state.checkpoint();
         }
@@ -327,7 +327,7 @@ unsafe fn libc_umask(mask: u32) -> u32 {
 /// enforcement) into "the abusive caller's extra connections are rejected while
 /// existing ones keep being served".
 ///
-/// Generous relative to the expected shape (§3.3: many concurrent callers, each
+/// Generous relative to the expected shape (many concurrent callers, each
 /// doing one short blocking round trip), so a legitimate burst is unaffected.
 ///
 /// A cap **alone is not enough**: a caller that opens exactly the cap's worth of
@@ -503,7 +503,7 @@ fn handle_data(request: DataRequest, state: &Arc<Mutex<DurableTemporalEngine>>) 
 
 // ─── The control path ────────────────────────────────────────────────
 
-/// Serve one control connection, after authorizing the peer's uid (§8.1).
+/// Serve one control connection, after authorizing the peer's uid.
 fn serve_control(
     mut stream: UnixStream,
     state: &Arc<Mutex<DurableTemporalEngine>>,
@@ -513,7 +513,7 @@ fn serve_control(
     // never parsed, so a caller who may not author policy cannot reach the
     // deserializer for policy-bearing types at all. The uid is used only to gate
     // access here; it is not forwarded to the engine, which records no attributed
-    // audit trail (docs/design/DURABLE_ENGINE_REFACTOR.md §5.3).
+    // audit trail.
     match peer_cred(&stream) {
         Ok(cred) if allowlist.permits(cred.uid) => {}
         Ok(cred) => {
@@ -638,7 +638,7 @@ fn handle_control(
             max_results,
             next_token,
         } => {
-            // The engine hands back the whole set under one lock (§2.7), in
+            // The engine hands back the whole set under one lock, in
             // creation order; pagination is this transport concern over that owned
             // snapshot. `next_token` is the last handle of the previous page —
             // resume at the entry *after* the one that bears it. An unknown token

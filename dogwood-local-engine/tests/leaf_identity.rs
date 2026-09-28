@@ -1,5 +1,5 @@
 //! Content-derived leaf identity ([`leaf_key`]) — the mechanism prospective
-//! installs rest on (`DESIGN.md` §9.1).
+//! installs rest on.
 //!
 //! `Condition` cannot be hand-constructed outside `dogwood-language` (its `span`
 //! field carries a crate-private type), so these tests build keys from **real,
@@ -9,10 +9,10 @@
 //!    accumulated window to a different rule — a silent authorization fault.
 //! 2. **Cosmetic edits preserve keys.** Reformatting, reordering rules, or adding
 //!    an unrelated rule must not change an existing leaf's key, or every policy
-//!    change would reset every rule's history (the §9.1 bug).
+//!    change would reset every rule's history.
 //! 3. **Semantic edits change keys.** Widening a window must produce a new key,
 //!    because prospectivity cannot conjure history that was never retained —
-//!    §9.2's "editing a temporal rule resets its window".
+//!    "editing a temporal rule resets its window".
 
 use dogwood_language::{LoweredPolicySet, PolicySchema, ServiceSchema};
 use dogwood_local_engine::leaf_key;
@@ -123,7 +123,7 @@ fn equivalent_window_spellings_share_a_key() {
 ///
 /// This is deliberate, not a limitation: a `1h` monitor has only ever retained an
 /// hour of history, so a `24h` rule cannot be handed that state and claim to have
-/// been watching for a day (§9.2 — editing a temporal rule resets its window).
+/// been watching for a day (editing a temporal rule resets its window).
 #[test]
 fn widening_a_window_changes_the_key() {
     assert_ne!(
@@ -135,7 +135,7 @@ fn widening_a_window_changes_the_key() {
 
 /// **Adding and reordering rules preserves each surviving leaf's key.**
 ///
-/// The load-bearing §9.1 property: leaf ids are positional (`__temporal_0`,
+/// The load-bearing property: leaf ids are positional (`__temporal_0`,
 /// `__temporal_1`, …), so inserting a rule *ahead* of an existing one shifts every
 /// later id. Keying by content means the shifted leaf still finds its own state
 /// instead of inheriting its neighbour's.
@@ -176,7 +176,7 @@ when temporal {{
 }
 
 /// Keys are stable across repeated lowerings of identical source — a restart
-/// must not re-prospective existing rules (§9.2's "restart ≠ install").
+/// must not re-prospective existing rules ("restart ≠ install").
 #[test]
 fn keys_are_deterministic_across_lowerings() {
     let policy = policy_with("1h", "Read");

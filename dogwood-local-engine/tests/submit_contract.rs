@@ -9,7 +9,7 @@
 //! This drives the durable engine directly, with no server or socket: the
 //! sequencer's contract is a property of the engine, so it is tested where it is
 //! made. The engine takes an un-timestamped [`EventBuilder`] and assigns the
-//! timestamp itself (`DESIGN.md` §3.3), so these tests build events with the
+//! timestamp itself, so these tests build events with the
 //! frontend builder and never name a timestamp.
 
 use dogwood_language::{Event, EventBuilder, Value};

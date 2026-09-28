@@ -20,6 +20,11 @@ concurrency:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Full debug info fills the runner's disk before the doctests link.
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
     steps:
       # Use first-party actions; install the Rust toolchain through rustup.
       # persist-credentials: false — token isn't used after checkout.
@@ -50,3 +55,7 @@ jobs:
 
       - name: Test
         run: cargo test --workspace
+
+      - name: Disk usage
+        if: always()
+        run: df -h / && du -sh target

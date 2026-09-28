@@ -18,7 +18,7 @@
 //! # Isolating capture from prune (the experimental design)
 //!
 //! N conflates the two. We separate them with the engine's injectable clock
-//! (`DESIGN.md` §3.3 — the store assigns timestamps, so a test controls the event
+//! (the store assigns timestamps, so a test controls the event
 //! clock without touching the events):
 //!
 //!   - **`in_window`** — step the clock by 1 ms per event, so all N events fall

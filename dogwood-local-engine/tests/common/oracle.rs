@@ -24,7 +24,7 @@
 //! # The one hard part: where history begins
 //!
 //! The server *keeps* a rule's accumulated window across a policy change when the
-//! rule is unchanged (`DESIGN.md` §9.1). A freshly built reference has no history
+//! rule is unchanged. A freshly built reference has no history
 //! at all. So a faithful comparison has to feed the reference from the same point
 //! the server's leaves started from — and a single reference has one shared
 //! history, so it can only represent one start point for all leaves.
@@ -218,8 +218,8 @@ fn history_start(ops: &[Op]) -> Result<(&Installed, i64), Unavailable> {
 
 /// Lower a bundle from its own source, independently of the engine's own rebuild.
 ///
-/// The service schema (event schema + macros) is store config now
-/// (`POLICY_INSTALL_SEMANTICS.md` §2.7), no longer carried in `Installed`. Every
+/// The service schema (event schema + macros) is store config now,
+/// no longer carried in `Installed`. Every
 /// oracle-driven workload configures the store with the **default** service
 /// schema, so the reference lowers against the defaults too; a workload that
 /// wanted a custom event schema would have to thread its config in here.
@@ -324,7 +324,7 @@ pub fn assert_agrees(
     // record must be one the harness knows about; one it does not means an
     // operation committed without being acknowledged, and history rebuilt from
     // `Promises` is missing it.
-    // An apply now spans a *range* of contiguous offsets (§2.6: per-verb records
+    // An apply now spans a *range* of contiguous offsets (per-verb records
     // + preamble records), so expand `Op::Applied` into every offset it wrote.
     let known: std::collections::BTreeSet<u64> = ops
         .iter()

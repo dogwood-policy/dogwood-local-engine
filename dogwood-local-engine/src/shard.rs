@@ -1,5 +1,4 @@
-//! Pin-sharded partitioning: routing events to independent monitor instances
-//! (`DESIGN.md` §3.3).
+//! Pin-sharded partitioning: routing events to independent monitor instances.
 //!
 //! # What makes this sound (and why it isn't just hashing)
 //!
@@ -23,9 +22,7 @@
 //! guards are tautological and the monitor is evaluating exactly the local
 //! semantics it was rewritten to match.
 //!
-//! The theorem is not assumed here — it is tested in the frontend
-//! (`dogwood-language/tests/pin_partition_differential.rs`, which replays global
-//! interleavings against per-key slices and requires equal verdicts). This module
+//! This module
 //! supplies the other half: routing that actually delivers each key's events, and
 //! *only* that key's events, to one instance.
 //!
@@ -33,14 +30,9 @@
 //!
 //! Without a universal symmetric pin, no partitioning is safe, and this module
 //! reports that rather than guessing: [`ShardPlan::from_policies`] returns
-//! [`ShardPlan::Unshardable`] and the server runs a single instance. Sharding is
+//! [`ShardPlan::Unshardable`]. Sharding is
 //! **opt-in by schema**, exactly as the rewrite is — a schema that does not
 //! declare a partition key does not get silently partitioned.
-//!
-//! This is why routing keys off the schema's declared pins rather than hashing
-//! something convenient like the principal: hashing the principal would look
-//! right and be wrong on a schema that pins nothing, because the frontend would
-//! not have rewritten `previous`/`since` for it.
 
 use dogwood_language::{EventPinRoot, LoweredPolicySet};
 
@@ -112,7 +104,7 @@ impl ShardPlan {
 
 // Routing an event to its partition key — [`ShardKey`], `key_of`, and their
 // value-rendering helpers — lives in the server (`dogwood-server`'s `routing`
-// module), because it operates on the server's wire `WireEvent`. This module
+// module). This module
 // keeps only the schema-derived *plan*: what the stream may be partitioned on.
 
 /// Is a pin *symmetric* — does its request-side target resolve to the pinned

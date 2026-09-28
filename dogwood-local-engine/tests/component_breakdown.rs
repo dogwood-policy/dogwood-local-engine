@@ -1,5 +1,4 @@
-//! Per-decision cost breakdown for verdict slicing. See
-//! `docs/design/VERDICT_SLICING_APPROACHES.md`.
+//! Per-decision cost breakdown for verdict slicing.
 //!
 //! The ignored benchmarks compare sliced and unsliced evaluation over identical
 //! monitor state and assert their leaf-count and decision premises before timing.

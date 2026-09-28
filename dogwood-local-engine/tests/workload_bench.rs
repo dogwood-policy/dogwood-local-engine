@@ -3,12 +3,12 @@
 //! The generators cover 29 policy shapes across grids of state sizes and policy
 //! counts. Separate ingest and decision timings show how each case scales
 //! (linear work ~2× per state doubling, quadratic ~4×). The `true#` column is the vacuity guard: a case whose
-//! probes never fire is measuring an all-miss path (the ivm branch's
+//! probes never fire is measuring an all-miss path (the
 //! multi_since_cross lesson) — treat `true# = 0` as a broken workload.
 //!
 //! Cases (one `#[test]` each; run one with `--test workload_bench <name>`):
 //!
-//! | test | DTC case | shape |
+//! | test | original case | shape |
 //! |---|---|---|
 //! | `once` | once | `formerly within 24h Login` (ctx-correlated) |
 //! | `prev` | prev | `previous within 24h Login::request` (per-step setup) |
@@ -90,9 +90,9 @@ namespace Test {
 }
 "#;
 
-/// DTC's bench event schema: unpinned, with `max_window` raised to a year so
+/// The bench event schema: unpinned, with `max_window` raised to a year so
 /// the grids' unique-window allocation (n * 4h) never hits the 24h default
-/// cap (copied from Dogwood_Temporal_Compiler's benches/bench/cases/mod.rs).
+/// cap.
 const BENCH_EVENT_SCHEMA: &str = r#"
 max_window = 8760h
 
@@ -122,8 +122,8 @@ event <A>::error {
 
 fn lower(policy: &str) -> LoweredPolicySet {
     let schema = PolicySchema::from_cedarschema_str(SCHEMA).expect("schema builds");
-    // UNPINNED (raised max_window) + validated, matching DTC's bench harness
-    // exactly: the pinned default RELATIVIZES leaves (e.g. positive-left
+    // UNPINNED (raised max_window) + validated, matching the original bench
+    // harness exactly: the pinned default RELATIVIZES leaves (e.g. positive-left
     // since -> count aggregation; `previous` -> a shape 3 orders of magnitude
     // slower in BOTH engines), so pinned lowering benchmarks rewritten shapes
     // the original workload never ships.
@@ -226,7 +226,7 @@ fn measure_count() -> usize {
 }
 
 /// A measured decision: untimed setup events, then the timed probe
-/// (matching DTC's `MeasuredStep`).
+/// (matching the original harness's `MeasuredStep`).
 struct Step {
     setup: Vec<Event>,
     probe: Event,
@@ -324,9 +324,9 @@ fn run(
     steps: Vec<Step>,
 ) {
     let (inc, vi) = lane(LocalTemporalEngine::new(), lowered, &warmup, &steps);
-    // Vacuity visibility (the multi_since_cross lesson, ivm RESULTS
-    // §6.17.2): a bench whose probes never fire measures an all-miss
-    // path without saying so. Print the count of TRUE verdicts.
+    // Vacuity visibility (the multi_since_cross lesson): a bench whose
+    // probes never fire measures an all-miss path without saying so. Print
+    // the count of TRUE verdicts.
     let trues: usize = vi.iter().sum();
     println!(
         "{axis_val:>10} | {state:>6} | {:>8.1} | {:>8.1} | {:>9.1} | {trues:>6}",
@@ -467,7 +467,7 @@ fn sum_since() {
 
 /// `previous` holds one row per timepoint: each measured step's setup is a
 /// Login REQUEST at the immediately preceding timepoint (untimed), then the
-/// timed Read (as in DTC's `prev`; state axis is meaningless here).
+/// timed Read (as in the original `prev`; state axis is meaningless here).
 #[test]
 #[ignore = "benchmark: run explicitly with -- --ignored"]
 fn prev() {
@@ -538,7 +538,7 @@ fn count_window() {
 
 /// The since/formerly condition vocabulary shared by all grids.
 /// `corr`: how the condition correlates. Windows are handed out by the
-/// caller so they stay globally unique (4h, 8h, … as in DTC).
+/// caller so they stay globally unique (4h, 8h, …).
 enum Corr<'a> {
     Ctx,
     Var(&'a str),
@@ -709,7 +709,7 @@ fn event_count_grid() {
 
 /// since_grid's policy, but the guard FIRES: per anchor, `churn` logouts
 /// follow the login; a trailing login per key keeps the verdict permitting.
-/// Sweep churn with anchors HELD FIXED (DTC's reading: flat cost = guard
+/// Sweep churn with anchors HELD FIXED (the reading: flat cost = guard
 /// state bounded; climbing = it is not).
 #[test]
 #[ignore = "benchmark: run explicitly with -- --ignored"]
@@ -744,12 +744,12 @@ fn since_churn_grid() {
     }
 }
 
-/// Heterogeneous control (DTC's `mixed_grid_n`, structural analogue): block
+/// Heterogeneous control (the original `mixed_grid_n`, structural analogue): block
 /// styles drawn from a seeded xorshift PRNG over the proven templates, so no
 /// two subgraphs are string-identical while staying structurally related.
-/// Same reading as DTC: an optimization that only fires on copy-paste shows
+/// The reading: an optimization that only fires on copy-paste shows
 /// a gap against since_grid; one recognizing structural sameness closes it.
-/// (DTC's finer BENCH_MIX granularity — varying the action pair per
+/// (The original's finer BENCH_MIX granularity — varying the action pair per
 /// condition — is not reproduced.)
 #[test]
 #[ignore = "benchmark: run explicitly with -- --ignored"]
@@ -810,7 +810,7 @@ fn mixed_grid() {
     }
 }
 
-// ── nested temporal workloads (plan §12; RESULTS §6.6's noted gap) ──────
+// ── nested temporal workloads ──────────────────────────────────────────
 
 /// Nested-formerly policy of the given DEPTH: the outermost atom is a
 /// Transfer response, each inner level wraps another `formerly` around the
@@ -942,7 +942,7 @@ when temporal {
     }
 }
 
-/// Plan §15: an aggregate threshold inside a `formerly` body (the freeze
+/// An aggregate threshold inside a `formerly` body (the freeze
 /// outer join capturing count-at-j; the threshold read as a residual).
 #[test]
 #[ignore = "benchmark: run explicitly with -- --ignored"]
@@ -1221,7 +1221,7 @@ when temporal {
     }
 }
 
-/// THE PRODUCTION CONFIGURATION (plan §9): the DEFAULT (pinned) schema,
+/// THE PRODUCTION CONFIGURATION: the DEFAULT (pinned) schema,
 /// head-to-head — the incumbent evaluates the RELATIVIZED leaves globally
 /// (production today: positive-left since → the count-equality encoding);
 /// the IVM engine evaluates the NON-relativized leaves natively
@@ -1354,13 +1354,6 @@ when temporal {
 /// the bare divergence read — it freezes foo(j) ⋈ live-anchors per step.
 /// Two variants: foo KEY-SHARED with the since (the common shape; expected
 /// flat) and foo UNSHARED (the cross-join worst case; expected O(anchors)
-/// VACUITY FIX (2026-08-13, found by the true# column on port): the
-/// original inner since had a POSITIVE left (`Transfer since Transfer`),
-/// which is UNSATISFIABLE at a Login timepoint under one-event-per-
-/// timestamp — the Login itself breaks the streak — so every historical
-/// number for this case (both engines, the ivm branch's 60–77 µs
-/// included) measured an all-false workload. Inner left is now the
-/// satisfiable negated form.
 /// per step — this case documents the boundary).
 #[test]
 #[ignore = "benchmark: run explicitly with -- --ignored"]
@@ -1454,8 +1447,8 @@ when temporal {
     }
 }
 
-/// MULTI-SINCE with DISJOINT anchors (the documented O(∏ kᵢ) bound —
-/// design §3.3b): since-1 keys on the user param, since-2 on an
+/// MULTI-SINCE with DISJOINT anchors (the documented O(∏ kᵢ) bound):
+/// since-1 keys on the user param, since-2 on an
 /// existential session shared with NOTHING, so the joined anchor root is
 /// a CROSS PRODUCT (user-anchors × all live session-anchors) and reads
 /// enumerate it. This case DOCUMENTS the boundary — expected to grow

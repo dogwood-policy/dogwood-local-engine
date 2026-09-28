@@ -1,27 +1,23 @@
-//! Incremental temporal monitoring — the general **table-based** `meval`
-//! tree-walk that replaces an O(history) rescan of the retained trace
-//! (`DESIGN.md` §4), ported from the verified Lean reference
-//! (`Monitor/Ref`).
+//! Incremental temporal monitoring — the general **table-based**
+//! tree-walk.
 //!
 //! # The design (why it is uniform, with no special cases)
 //!
-//! This mirrors the interpreter's proven relational recursion
+//! This mirrors the interpreter's relational recursion
 //! (the frontend interpreter's `match_occurrences`) **exactly**, over a maintained,
 //! window-bounded set of timepoints instead of the full trace. The property
 //! that must never be compromised: a node is evaluated **at a timepoint** under
 //! an environment, and the decision request is threaded as ordinary env
 //! bindings — so a `context.*` / `principal` / `resource` read (which always
 //! refers to the **decision** request, even inside a past operator) resolves
-//! uniformly at every timepoint, never collapsed away or deferred. That is what
-//! pure MFOTL gets for free (no request reads) and what earlier
-//! collapse-at-step attempts kept losing.
+//! uniformly at every timepoint, never collapsed away or deferred.
 //!
 //! ## Structure
 //!
 //! - Predicates keep a **per-timepoint history** of their matched rows over the
 //!   retained window (one `Option<Row>` per retained timepoint). No collapsing.
 //! - [`occ`](Node::occ) evaluates any node **at a retained timepoint index `k`**
-//!   under `env`, with the same algebra as the reference (join for `&&`, union
+//!   under `env` (join for `&&`, union
 //!   for `||`, anti-filter for `!`, projection for `exists`, `tp` binding,
 //!   comparison filter/binder, aggregation reduction).
 //! - Temporal nodes union / streak / delay their child's `occ` over the
@@ -36,7 +32,7 @@
 //! value under the env key `context.input.user`; at verdict that same key is
 //! seeded with the **decision's** value, so [`compatible`] joins them — the
 //! correlation. A `context.*` used directly in a comparison reads the same
-//! seeded key. One mechanism, no `§`/`¶` columns, no deferral.
+//! seeded key.
 //!
 //! [`Node::build`] returns `None` only for inputs outside the temporal fragment
 //! (transient macro sigils / `Refine`, which never reach a prepared leaf).
@@ -55,8 +51,7 @@ use crate::tick::TickRate;
 /// Bindings threaded through evaluation (variable / request-key → value).
 /// Seeded at verdict with the decision request's `context.*` values (key
 /// `context.<path>`) and scope values (key `@<path>`), then extended with
-/// matched-variable bindings as the recursion descends — mirrors the reference
-/// `Env` and its `context.`/`@` keyspaces.
+/// matched-variable bindings as the recursion descends.
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -70,9 +65,6 @@ type Env = BTreeMap<String, Value>;
 /// `Clone` for `Arc::make_mut`: see `LocalTemporalEngine::monitors`.
 #[derive(Clone)]
 struct Timeline {
-    /// VecDeque, NOT Vec (amortized pruning, tests/leaf_prune.rs p1):
-    /// the per-observe `drain(..drop)` on a Vec memmoves the WHOLE
-    /// retained timeline; a ring buffer advances its head in O(drop).
     ts: std::collections::VecDeque<i64>,
     tp_id: std::collections::VecDeque<i64>,
 }
@@ -110,7 +102,7 @@ impl Eq for DomEqKey {}
 /// The memo's storage: the value map plus a TIMEPOINT-BUCKETED eviction
 /// index. In steady state (a trace longer than the window) the prune
 /// branch fires on ~every observe, so eviction must NOT rescan the map
-/// (O(entries) per event — the original `retain` design's flaw): the
+/// (O(entries) per event): the
 /// index makes it O(log W) to find the dead prefix and O(1) amortized
 /// per entry over its lifetime (each entry is enqueued once at insert,
 /// dequeued once at eviction). Inserts are NOT tp-ordered across
@@ -147,7 +139,7 @@ impl MemoMap {
     }
 }
 
-/// The aggregate memo (MEMO_DESIGN.md): caches `Operand::Agg`
+/// The aggregate memo: caches `Operand::Agg`
 /// values keyed by (agg id, PERMANENT timepoint id, the env projected
 /// onto the body's free keys). Sound because the language is past-only
 /// (a value at tp is fixed once evaluated) and pruning is
@@ -161,7 +153,7 @@ struct AggMemo {
     /// (ParamRef/BinderRef/nested Term::Agg) — those run unmemoized.
     eligible: Vec<bool>,
     /// Locks RECOVER from poisoning (`into_inner`): entries never go
-    /// stale (§4), so a panic mid-decide cannot leave a wrong value —
+    /// stale, so a panic mid-decide cannot leave a wrong value —
     /// at worst a missing insert. `.expect` would brick both decide
     /// AND ingest (step's eviction) forever after one panic.
     map: Mutex<MemoMap>,
@@ -253,8 +245,8 @@ impl Monitor {
                 self.timeline.ts.drain(..drop);
                 self.timeline.tp_id.drain(..drop);
                 self.root.drop_front(drop);
-                // Memo eviction: memory-only (entries never go stale —
-                // design §4.2); anything whose timepoint left the
+                // Memo eviction: memory-only (entries never go stale);
+                // anything whose timepoint left the
                 // retained timeline can never be read again.
                 let min_live = self.timeline.tp_id.front().copied().unwrap_or(i64::MAX);
                 self.memo
@@ -270,7 +262,7 @@ impl Monitor {
     /// (`ts` / `tp_id` / `next_tp`) and every predicate's per-timepoint match
     /// history, in a fixed tree-walk order. The `Node` tree *shape* is not
     /// stored; it is rebuilt from the leaves at [`build`](Self::build) and the
-    /// state loaded back into it (`DESIGN.md` §6.3).
+    /// state loaded back into it.
     pub fn save(&self) -> Vec<u8> {
         use crate::snapshot::{encode_time_row, put_i64, put_u64};
         let mut out = Vec::new();
@@ -379,7 +371,6 @@ impl Monitor {
         true
     }
 
-    /// Whether the leaf holds at the current decision point.
     /// The prune horizon (the nesting-sum max window) — the shard
     /// sweep's full-expiry threshold (src/partition.rs).
     pub fn retention_window(&self) -> i64 {
@@ -415,6 +406,7 @@ impl Monitor {
         )
     }
 
+    /// Whether the leaf holds at the current decision point.
     pub fn verdict(&self, decision: &Event) -> bool {
         let Some(cur) = self.timeline.ts.len().checked_sub(1) else {
             return false;
@@ -567,7 +559,7 @@ impl Operand {
             } => {
                 let inner = shed_for_binders(env, for_vars);
                 let idx = *memo_id as usize;
-                // THE MEMO (design MEMO_DESIGN.md §2.5): the value
+                // THE MEMO: the value
                 // at a PERMANENT timepoint id under the body's free-key
                 // projection is fixed forever (past-only language;
                 // prune-transparent retention), so cache-through.
@@ -604,8 +596,7 @@ impl Operand {
                 // Fold the body's relation at `k` into the distinct-projection
                 // aggregate in one pass (a `dom_eq`-consistent hash), rather than
                 // materializing a deduped `Vec<Row>` and reducing it — see
-                // `project_count` / `project_sum`. `agg_witnesses` gives the body
-                // rows without `formerly`'s redundant full-row dedup (§4a pass 1).
+                // `project_count` / `project_sum`.
                 let rows = body.occ(k, &inner, tl, memo);
                 Some(Value::Int(match kind {
                     AggKind::Count => project_count(&rows, for_vars),
@@ -690,7 +681,7 @@ impl Node {
     }
 
     /// Max window (seconds) in the subtree — windows compose additively down
-    /// temporal operators (mirrors [`crate::reach`]); `i64::MAX` is unbounded.
+    /// temporal operators; `i64::MAX` is unbounded.
     fn max_window(&self) -> i64 {
         match self {
             Node::Pred { .. } | Node::Tp { .. } => 0,
@@ -1051,10 +1042,10 @@ fn window_start(tl: &Timeline, lo: usize, w: i64) -> usize {
 
 /// Assign memo ids to every `Operand::Agg` (pre-order) and record each
 /// body's FREE ENV KEYS — a build-time over-approximation of the env
-/// bindings the body can read (design §2.4 rules R2/R8/R9). Env-reading
+/// bindings the body can read. Env-reading
 /// channels, enumerated BY EVALUATION SITE: `compatible` (Pred row keys:
 /// Var names + Correlated request-keys), `Node::Tp`'s `env.get(var)`
-/// (READS, not just binds — R2), `resolve_term` (Var / ContextField /
+/// (READS, not just binds), `resolve_term` (Var / ContextField /
 /// ScopeField / Array), and `Operand::unbound_var` (a Compare Var).
 fn index_agg_memos(node: &mut Node, memo: &mut AggMemo) {
     match node {
@@ -1087,7 +1078,7 @@ fn index_agg_operand(op: &mut Operand, memo: &mut AggMemo) {
         index_agg_memos(body, memo);
         let mut keys = std::collections::BTreeSet::new();
         free_env_keys(body, &mut keys);
-        // [R8] shed_for_binders sheds exactly the for_vars; bound_var
+        // shed_for_binders sheds exactly the for_vars; bound_var
         // removal is safe only because bound_var ∈ for_vars.
         if let Some(b) = bound_var {
             debug_assert!(
@@ -1100,16 +1091,16 @@ fn index_agg_operand(op: &mut Operand, memo: &mut AggMemo) {
         }
         *memo_id = memo.free_keys.len() as u32;
         memo.free_keys.push(keys.into_iter().collect());
-        // Eligibility: opaque terms (pitfall 3) AND unbounded retention —
+        // Eligibility: opaque terms AND unbounded retention —
         // eviction rides pruning, so a body whose max_window is i64::MAX
-        // would grow the memo forever (review F3). Such bodies run
+        // would grow the memo forever. Such bodies run
         // unmemoized.
         memo.eligible
             .push(!body_has_opaque_terms(body) && body.max_window() != i64::MAX);
     }
 }
 
-/// Terms whose env behavior we refuse to reason about (pitfall 3):
+/// Terms whose env behavior we refuse to reason about:
 /// pre-substitution forms and nested Term-level aggregates. Bodies
 /// containing them run UNMEMOIZED (today's path verbatim).
 fn body_has_opaque_terms(node: &Node) -> bool {
@@ -1154,14 +1145,14 @@ fn free_env_keys(node: &Node, out: &mut std::collections::BTreeSet<String>) {
                 }
             }
         }
-        // [R2] Tp READS env.get(var) as a filter — include, never remove.
+        // Tp READS env.get(var) as a filter — include, never remove.
         Node::Tp { var } => {
             out.insert(var.clone());
         }
         Node::Exists { var, child } => {
             let mut inner = std::collections::BTreeSet::new();
             free_env_keys(child, &mut inner);
-            inner.remove(var); // verified: Exists shadows via env.remove
+            inner.remove(var); // Exists shadows via env.remove
             out.extend(inner);
         }
         Node::Compare { left, right, .. } => {
@@ -1732,7 +1723,7 @@ mod load_atomicity_tests {
 
 #[cfg(test)]
 mod agg_memo_key_tests {
-    //! DomEqKey unit pins (review F1 — the 7d1a335 bug class): decimal
+    //! DomEqKey unit pins: decimal
     //! SPELLINGS must collide (dom_eq compares numerically), which the
     //! integration schema (Long fields) cannot reach.
 

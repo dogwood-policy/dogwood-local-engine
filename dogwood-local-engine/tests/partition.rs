@@ -1,4 +1,4 @@
-//! Native pin partitioning — the battery (docs/design/PARTITION_DESIGN.md §6).
+//! Native pin partitioning — the battery.
 //!
 //! THREE-LANE DISCIPLINE: every semantic test drives
 //!   (1) the native-sharded local engine (non-relativized leaves +
@@ -277,7 +277,7 @@ fn p4_in_shard_correlation() {
 
 // ── the sweep ───────────────────────────────────────────────────────────
 
-/// P5 (sweep-transparency — the full-expiry theorem as a test): pins go
+/// P5 (sweep-transparency): pins go
 /// quiet past the retention window, then are probed again. Verdicts
 /// must match the oracle (which never deletes anything) exactly,
 /// including AT the horizon boundary.
@@ -502,7 +502,7 @@ fn p13_double_evaluate() {
     }
 }
 
-/// P14 (review-3 D1): keys after prepare would leave observe iterating
+/// P14: keys after prepare would leave observe iterating
 /// an empty shard list and evaluate returning EMPTY bindings — verdicts
 /// silently vanish (fail-open). Must refuse.
 #[test]
@@ -514,7 +514,7 @@ fn p14_late_partition_keys_refused() {
     e.set_partition_keys(&keys); // too late
 }
 
-/// P15 (review-3 D2): re-prepare fully resets the previous mode — no
+/// P15: re-prepare fully resets the previous mode — no
 /// stale shards double-counted, no stale sweep clock. Partitioned →
 /// re-prepare partitioned: counts start from zero; verdicts fresh.
 #[test]
@@ -541,7 +541,7 @@ fn p15_reprepare_resets() {
     }
 }
 
-/// P16 (review-3 gap d): the memo composes with IN-SHARD PRUNING — an
+/// P16: the memo composes with IN-SHARD PRUNING — an
 /// aggregate policy driven past its retention inside shards, with the
 /// memo's per-shard eviction riding each shard's prune. Three-lane.
 #[test]
@@ -577,7 +577,7 @@ when temporal {
     );
 }
 
-/// P17 (review-3 gap f, adapted): leaves sweep at their OWN horizons.
+/// P17: leaves sweep at their OWN horizons.
 /// (The design's i64::MAX never-sweep branch is frontend-UNREACHABLE —
 /// every temporal operator requires a `within` clause — so it stays a
 /// defensive branch; this test pins the differential-horizon behavior
@@ -625,7 +625,7 @@ when temporal {
     );
 }
 
-/// P18 (review-3 gap c): duplicate delivery of the SAME event instance
+/// P18: duplicate delivery of the SAME event instance
 /// (same ts, same pin, same fields — an at-least-once transport).
 /// Three-lane referees whatever the semantics are; the lanes must agree.
 #[test]
@@ -732,7 +732,7 @@ fn three_lane_trace(lowered: &LoweredPolicySet, log: &str) {
     assert!(fired[0] > 0 && fired[1] > 0, "vacuous trace: {fired:?}");
 }
 
-/// P19 (review-3 gap e): the `<none>` shard. Events whose LOGGED pin
+/// P19: the `<none>` shard. Events whose LOGGED pin
 /// field is ABSENT all route to the shared `<none>` partition — they
 /// see each other's history (by the oracle's definition) and nothing
 /// from real sessions; real sessions never see `<none>` events.
@@ -796,7 +796,7 @@ event <A>::response {
     three_lane_trace(&lowered, &log);
 }
 
-/// P21 (review-3 rank 4): scaled post-sweep verdict re-probe — 100 pins
+/// P21: scaled post-sweep verdict re-probe — 100 pins
 /// warmed, most swept past the window, then EVERY pin re-probed with
 /// the oracle refereeing (sweep-boundary errors that manifest only on
 /// specific pins — e.g. index-ordering bugs — surface here).
@@ -869,7 +869,7 @@ fn p22_lifecycle_noops() {
     drop(nat);
 }
 
-// ── snapshot format v2 (PARTITION_DESIGN.md §4.3) ───────────────────────
+// ── snapshot format v2 ───────────────────────
 
 /// P23: the partitioned snapshot round-trip — warm shards (incl. warm
 /// memos), save, load into a freshly prepared engine, and continue the

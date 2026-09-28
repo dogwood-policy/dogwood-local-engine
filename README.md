@@ -1,7 +1,25 @@
 # Dogwood Local Engine
 
 This repository contains the implementation of an authorization engine for
-policies expressed in the Dogwood policy language.
+policies expressed in the [Dogwood](https://github.com/dogwood-policy/dogwood)
+policy language. Dogwood policies can refer to an agent's past actions and
+their outcomes; this engine keeps that history, durably and in order, and
+decides each request against it.
+
+For a walkthrough of the library, from a policy and a schema to a program that
+opens a store, installs the policy and submits events, see
+[`dogwood-local-engine/README.md`](dogwood-local-engine/README.md). The
+language itself, its guide, and the reference interpreter live in
+[dogwood-policy/dogwood](https://github.com/dogwood-policy/dogwood) and
+[the Dogwood guide](https://dogwood-policy.github.io/dogwood/).
+
+To use the engine, add it and the language crate to a project:
+
+```toml
+[dependencies]
+dogwood-local-engine = "1.0"
+dogwood-language = "1.0"
+```
 
 The repository is organized into three crates:
 
@@ -19,12 +37,14 @@ state in a durable way on the filesystem, so that if a process using the
 library crashes or shuts down, subsequent authorization requests can be
 processed after restart while accounting for events that preceded the crash.
 
-The `dogwood-server` shows how one might build a local daemon service for
+The `dogwood-server` crate shows how one might build a local daemon service for
 issuing authorization decisions using this library. This demo application
 listens on two Unix sockets. One socket is used for *control plane* operations,
 which edit the policy set that the engine is monitoring. The other is used for
 *data plane* operations: incoming history and decision events. The engine
 records all these events and issues verdicts for decision events.
+
+## Embedding the engine safely
 
 There are a few important precautions to keep in mind when constructing an
 authorization service like the `dogwood-server` that uses the library. In
@@ -98,3 +118,27 @@ not limited to, the following concerns:
   the system clock moves backwards. But monotonicity alone does not prevent
   clock dilation, contraction, or skew from affecting outcomes, so the host
   clock must still be secured and monitored.
+
+## Design documents
+
+- [`docs/design/DESIGN.md`](docs/design/DESIGN.md): the engine's architecture
+  and the decisions behind it.
+
+## Building and testing
+
+The workspace builds with a recent stable Rust toolchain (edition 2024):
+
+```bash
+cargo build --workspace --all-targets
+cargo test --workspace
+```
+
+## Contributing
+
+This repository is a published, read-only mirror; see
+[CONTRIBUTING.md](CONTRIBUTING.md). To report a security issue, follow
+[SECURITY.md](SECURITY.md).
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

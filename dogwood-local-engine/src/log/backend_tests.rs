@@ -197,7 +197,7 @@ fn the_prune_watermark_survives_a_freeze() {
 
 #[test]
 fn an_emptying_prune_does_not_restart_offsets_across_a_freeze() {
-    // The regression that motivated persisting `next_offset`: a prune can empty
+    // A prune can empty
     // the table, and a counter derived from the highest surviving record would
     // then restart at 0 and reissue offsets below the snapshot watermark.
     let (backend, image) = SharedMem::empty();

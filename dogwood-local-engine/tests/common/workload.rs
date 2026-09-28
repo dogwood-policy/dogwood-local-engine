@@ -57,8 +57,8 @@ pub enum Retention {
 pub enum Op {
     /// A policy change the server acknowledged.
     ///
-    /// A change is a *contiguous range* of durable records
-    /// (`POLICY_INSTALL_SEMANTICS.md` §2.6), so it names its boundary offset
+    /// A change is a *contiguous range* of durable records,
+    /// so it names its boundary offset
     /// (`offset`, the tail) **and** the head (`first_offset`) — the oracle's
     /// quiescence check accounts for every record the change committed rather
     /// than pretending it cost one offset.

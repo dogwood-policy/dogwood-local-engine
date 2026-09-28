@@ -30,8 +30,8 @@ pub enum Pinning {
     /// events.
     Unpinned,
     /// `session_id` pinned symmetrically on every event kind — a universal
-    /// symmetric pin, so it is both a per-predicate correlation and (per
-    /// `DESIGN.md` §3.3) a valid partition key.
+    /// symmetric pin, so it is both a per-predicate correlation and a valid
+    /// partition key.
     PinnedSession,
 }
 
@@ -201,8 +201,8 @@ pub fn lower(count: usize, pinning: Pinning) -> LoweredPolicySet {
 pub struct GenEvent {
     /// `"Login"` (history-bearing) or `"Read"` (a decision).
     pub action: &'static str,
-    /// Wall-clock timestamp for the reference driver. The server assigns its own
-    /// (`DESIGN.md` §3.3), so this is ignored there — see `driver::server`.
+    /// Wall-clock timestamp for the reference driver. The server assigns its own,
+    /// so this is ignored there — see `driver::server`.
     pub ts: i64,
     pub user: String,
     pub server: String,

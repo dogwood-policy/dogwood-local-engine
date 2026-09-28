@@ -38,8 +38,8 @@
 //! snapshot. It is a property of that log-management discipline, which is why it
 //! is checked here against the durable engine.
 //!
-//! It is a different thing from the window-pruning inside `LocalTemporalEngine`
-//! (`DESIGN.md` §6.2), which drops *events from a monitor's in-memory trace* once
+//! It is a different thing from the window-pruning inside `LocalTemporalEngine`,
+//! which drops *events from a monitor's in-memory trace* once
 //! they fall outside every operator's lookback, with no snapshot involved. That
 //! pruning never touches the durable log's offsets, so this invariant neither
 //! constrains nor describes it.
@@ -75,7 +75,7 @@ pub struct LogFacts {
     /// Surviving records as `(offset, timestamp, is_event)`, in offset order.
     /// `is_event` distinguishes an ingested event from a policy verb record —
     /// events must have strictly-increasing timestamps (windows are measured
-    /// against them), while a batch's policy records share one instant (§2.5).
+    /// against them), while a batch's policy records share one instant.
     pub records: Vec<(u64, i64, bool)>,
 }
 
@@ -350,7 +350,7 @@ pub fn records_dense(f: &LogFacts) -> Result<(), Violation> {
 ///
 /// A decrease is always a violation. A **tie** is allowed only between two policy
 /// records: a batch is one atomic instant ("sequential in meaning, transactional
-/// in effect", §2.5), so its verb records share a timestamp and their order is
+/// in effect"), so its verb records share a timestamp and their order is
 /// carried by the log offset, not the timestamp. Events must still strictly
 /// increase — windows are measured against the event sequence — so any tie or
 /// drop involving an event is a violation.

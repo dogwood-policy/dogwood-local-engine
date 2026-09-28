@@ -5,7 +5,7 @@
 //! links it can rewrite the policy set it is being judged by, and you cannot
 //! govern an agent with a rule it controls. This crate closes that by moving the
 //! policy set, the compiled monitor, and the event log behind a **process
-//! boundary enforced by the OS** (`DESIGN.md` §7), reached only through a small
+//! boundary enforced by the OS**, reached only through a small
 //! local wire API.
 //!
 //! # Shape
@@ -20,15 +20,14 @@
 //!   holds directly. The only work between wire and engine is mapping the wire
 //!   [`WireEvent`](protocol::WireEvent) to an event builder
 //!   ([`codec::to_event_builder`]); durability and recovery are the engine's.
-//!   See `docs/design/DURABLE_ENGINE_REFACTOR.md`.
 //! - [`peer`] — peer-credential attestation and the control-plane uid allowlist
-//!   (§8.1). The mechanism the whole boundary rests on.
+//!   — the mechanism the whole boundary rests on.
 //! - [`codec`] — the event wire/log format.
 //! - [`client`] — reference clients for both sockets.
 //!
 //! # The deployment prerequisite
 //!
-//! §7.1 is explicit and worth repeating wherever this crate is described: the
+//! It is worth repeating wherever this crate is described: the
 //! boundary is real only if the **server runs as a different, lower-privileged
 //! uid than the monitored agent**. Same uid, no boundary — root and the server's
 //! own operator are outside the threat model by construction.

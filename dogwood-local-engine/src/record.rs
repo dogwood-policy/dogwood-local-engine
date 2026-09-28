@@ -1,20 +1,5 @@
-//! The **persisted formats this server defines**: the log record envelope, and
+//! The **persisted formats**: the log record envelope, and
 //! the snapshot payload.
-//!
-//! # Why the server owns this
-//!
-//! The log stores opaque bytes and says so: *what* to persist is a caller
-//! concern (`DESIGN.md` §2). Until now the server borrowed the engine's
-//! `JsonEventCodec`, which owns the whole record including its envelope, and
-//! then reached back inside it to read `ts` — so the format had two owners and
-//! neither of them was the one adding record kinds.
-//!
-//! The split here puts each half with whoever knows it. The engine keeps the
-//! `Event` ↔ JSON mapping ([`event_to_json`] / [`event_from_json`]): grouped
-//! logged fields, the scope aliases, tagged `Value`s — frontend knowledge, and
-//! not something to re-derive. The server keeps the envelope, because the
-//! envelope is where the two things the server alone knows live: the timestamp it
-//! assigns, and which *kind* of thing happened.
 //!
 //! # The kinds
 //!
@@ -31,13 +16,11 @@
 //! ```
 //!
 //! The event schema and macro library are **not** here: they are store
-//! configuration (`POLICY_INSTALL_SEMANTICS.md` §2.7), set once and held in a
+//! configuration, set once and held in a
 //! metadata slot, so they never enter the ordered record stream.
 //!
 //! One discriminant, checked by presence. Each is either an event or **one
-//! policy-management verb** (`POLICY_INSTALL_SEMANTICS.md` §2.6) — the flat
-//! generalization of the former `Event` + `Apply`, where `Apply` was really just
-//! the whole-bundle case. There is deliberately **no `Batch` record**: a batch is
+//! policy-management verb**. There is deliberately **no `Batch` record**: a batch is
 //! a *set* of these verb records committed in one transaction
 //! (`log.commit(&[Write::Append …])`), and because no event can interleave under
 //! the single-writer lock they occupy contiguous offsets. Replay is therefore
@@ -48,8 +31,8 @@
 //! **Minted ids are recorded, like timestamps.** Each `Add` carries the
 //! engine-assigned [`PolicyId`], written into the record exactly as `submit`
 //! writes the timestamp it assigned, so replay re-applies and re-mints nothing
-//! (§2.4). Every record is a redo record: once a snapshot summarizes it (the
-//! snapshot carries the *folded* bundle, §2.6), it is reclaimable like any event.
+//! Every record is a redo record: once a snapshot summarizes it (the
+//! snapshot carries the *folded* bundle), it is reclaimable like any event.
 
 use dogwood_language::Event;
 use serde::Deserialize;
@@ -160,7 +143,7 @@ impl<'de> Visitor<'de> for UniqueJsonVisitor {
 }
 
 /// One record in the durable log: an ingested event, or one policy-management
-/// verb (`POLICY_INSTALL_SEMANTICS.md` §2.6). Every variant carries the
+/// verb. Every variant carries the
 /// store-assigned timestamp, its position in the one order events and policy
 /// changes share.
 #[derive(Debug, Clone, PartialEq)]
@@ -169,38 +152,71 @@ pub enum Record {
     Event(Event),
     /// A new policy installed, born fresh (empty history). Both the internal
     /// [`PolicyId`] ordinal and the opaque [`PolicyToken`] handle are recorded
-    /// here so replay re-uses them and never re-mints (§2.4) — the ordinal keys
+    /// here so replay re-uses them and never re-mints — the ordinal keys
     /// the transplant, the token is the caller's handle; the statement is already
     /// canonical.
     Add {
+        /// The store-assigned timestamp, in epoch nanoseconds.
         ts: i64,
+        /// The minted ordinal.
         id: PolicyId,
+        /// The minted handle.
         token: PolicyToken,
+        /// The canonical statement.
         statement: String,
     },
     /// A policy's content replaced by id — same id, reset history ("update
-    /// means reset", §2.2).
+    /// means reset").
     Update {
+        /// The store-assigned timestamp, in epoch nanoseconds.
         ts: i64,
+        /// The ordinal of the replaced policy.
         id: PolicyId,
+        /// The new canonical statement.
         statement: String,
     },
     /// A policy removed by id.
-    Delete { ts: i64, id: PolicyId },
-    /// One policy's accumulated history cleared; content unchanged (§2.2).
-    Reset { ts: i64, id: PolicyId },
+    Delete {
+        /// The store-assigned timestamp, in epoch nanoseconds.
+        ts: i64,
+        /// The ordinal of the removed policy.
+        id: PolicyId,
+    },
+    /// One policy's accumulated history cleared; content unchanged.
+    Reset {
+        /// The store-assigned timestamp, in epoch nanoseconds.
+        ts: i64,
+        /// The ordinal of the reset policy.
+        id: PolicyId,
+    },
     /// Every policy removed. The schema is kept and the empty set stays
-    /// installed, so decisions fail closed (§2.1).
-    DeleteAll { ts: i64 },
-    /// Every policy's history cleared; all policies kept (§2.1).
-    ResetAll { ts: i64 },
-    /// The action schema re-set: revalidate + re-lower the whole set (§2.7).
-    SetActionSchema { ts: i64, action_schema: String },
+    /// installed, so decisions fail closed.
+    DeleteAll {
+        /// The store-assigned timestamp, in epoch nanoseconds.
+        ts: i64,
+    },
+    /// Every policy's history cleared; all policies kept.
+    ResetAll {
+        /// The store-assigned timestamp, in epoch nanoseconds.
+        ts: i64,
+    },
+    /// The action schema re-set: revalidate + re-lower the whole set.
+    SetActionSchema {
+        /// The store-assigned timestamp, in epoch nanoseconds.
+        ts: i64,
+        /// The new action schema.
+        action_schema: String,
+    },
     /// A fragment appended to the action schema: revalidate + re-lower the whole
-    /// set under the concatenation (§2.7). The record carries the *fragment*, not
+    /// set under the concatenation. The record carries the *fragment*, not
     /// the merged schema — replay concatenates it onto the schema in force with
     /// the same rule the live fold used, so both reach the identical result.
-    AppendActionSchema { ts: i64, fragment: String },
+    AppendActionSchema {
+        /// The store-assigned timestamp, in epoch nanoseconds.
+        ts: i64,
+        /// The appended declarations.
+        fragment: String,
+    },
 }
 
 impl Record {
@@ -577,20 +593,16 @@ impl Record {
     }
 }
 
-/// What this server stores in a snapshot: the derived monitor state, **and the
+/// What the engine stores in a snapshot: the derived monitor state, **and the
 /// policy set it was derived under**.
 ///
 /// # Why the bundle belongs in here
 ///
 /// Monitor state is positional — the k-th leaf's state restores into the k-th
 /// leaf — so "state as of offset N" is meaningless without knowing which policy
-/// was installed at N. Keeping the policy in a separate register made that a pair
-/// of facts that had to agree, and a crash between the two writes left them
-/// disagreeing: recovery read the new register, prepared its leaves, and restored
-/// the old leaves' histories into them.
+/// was installed at N.
 ///
-/// Naming the policy inside the snapshot removes the obligation rather than
-/// enforcing it. Recovery starts from whatever policy the snapshot says it
+/// Recovery starts from whatever policy the snapshot says it
 /// describes, so the state always matches the leaves it is loaded into, and can
 /// then evolve forward through any later changes the log records.
 #[derive(Debug, Clone, PartialEq)]
@@ -602,18 +614,7 @@ pub struct SnapshotPayload {
     ///
     /// Here because a snapshot's job is to carry everything needed to resume
     /// *without* the records it summarizes — and the assigned clock is one of
-    /// those things. It used to be read back from the log's tail record on every
-    /// submit, which a checkpoint can prune away: `checkpoint` snapshots at
-    /// `next_offset` and prunes below it, so the working log is left empty, and
-    /// there is then nothing to read. `max(now, last + 1)` silently degraded to
-    /// `now`, dropping the monotonicity guarantee exactly when the clock might
-    /// have stepped backwards — and a timestamp below the history already folded
-    /// into this snapshot corrupts monitor state, since `Monitor`'s timeline
-    /// assumes ascending order and front-prunes with `partition_point`.
-    ///
-    /// The same shape as the bug that made `next_offset` persisted: a value
-    /// derived from surviving records loses its derivation when a prune empties
-    /// the log.
+    /// those things.
     pub last_ts: i64,
     /// The engine's serialized monitor state (`LocalTemporalEngine::save_snapshot`).
     pub engine: Vec<u8>,
@@ -622,10 +623,6 @@ pub struct SnapshotPayload {
 impl SnapshotPayload {
     /// `DWSP | u16 version | i64 last_ts | u32 bundle_len | bundle JSON |
     /// engine bytes`.
-    ///
-    /// A binary envelope rather than JSON throughout: the engine's state is
-    /// opaque bytes, and wrapping it in JSON would force a base64 or hex
-    /// expansion of the largest thing here.
     pub fn encode(&self) -> Result<Vec<u8>, String> {
         let bundle = serde_json::to_vec(&self.bundle)
             .map_err(|error| format!("snapshot payload bundle: {error}"))?;
@@ -644,6 +641,7 @@ impl SnapshotPayload {
         Ok(out)
     }
 
+    /// Parse an [`encode`](Self::encode)d payload; errors on a bad magic, an unsupported version, or a truncated or malformed bundle.
     pub fn decode(bytes: &[u8]) -> Result<SnapshotPayload, String> {
         if bytes.len() < SNAPSHOT_HEADER_LEN || &bytes[..4] != SNAPSHOT_MAGIC {
             return Err("snapshot payload does not name its policy set".to_string());
@@ -1001,10 +999,6 @@ mod envelope_tests {
     /// A malformed record is an error, not a panic — recovery reads bytes a crash
     /// may have truncated mid-write, and `replay_from` turns any decode failure
     /// into a refusal to open rather than a skipped record.
-    ///
-    /// Moved here from the engine's codec when the server took ownership of the
-    /// envelope: `ts` and the record-kind discriminant are this module's to
-    /// enforce, not the payload mapping's.
     #[test]
     fn malformed_records_are_rejected() {
         for bad in [

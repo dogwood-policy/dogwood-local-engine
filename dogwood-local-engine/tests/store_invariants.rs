@@ -164,7 +164,7 @@ fn a_repeated_or_falling_timestamp_across_events_is_caught() {
 
 #[test]
 fn policy_records_in_one_batch_may_share_a_timestamp() {
-    // A batch is one atomic instant (§2.5): its verb records (`false` = not an
+    // A batch is one atomic instant: its verb records (`false` = not an
     // event) share a timestamp, ordered by offset. That tie is allowed — only an
     // event tie is a violation. A following event must still strictly advance.
     let f = LogFacts {

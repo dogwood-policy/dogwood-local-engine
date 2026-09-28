@@ -6,10 +6,10 @@
 //! `LocalTemporalEngine` (system under test) — feed the same event stream, and
 //! assert the decisions match at every timepoint.
 //!
-//! This is the referee for the incremental rewrite (`DESIGN.md` §5): it is
+//! This is the referee for the incremental rewrite: it is
 //! green today because the engine delegates to the oracle, and it must *stay*
 //! green as the delegation is replaced by the window-bounded incremental
-//! operators. Unlike the DSQL differential it needs no database — it is a plain
+//! operators. It needs no database — it is a plain
 //! in-process comparison, so it runs on every build.
 //!
 //! Requires the `corpus` feature on `dogwood-language` (enabled as a
@@ -23,8 +23,8 @@ use dogwood_language::{
 use dogwood_local_engine::LocalTemporalEngine;
 
 /// The unpinned event schema (global-trace semantics). The corpus predates the
-/// pinned default and relies on cross-principal matching — mirror the DSQL
-/// differential's harness so the two engines are compared on identical terms.
+/// pinned default and relies on cross-principal matching, so the two engines are
+/// compared under it on identical terms.
 const UNPINNED_EVENT_SCHEMA: &str = r#"
 decision event <A>::request {
     ...inputs(A),

@@ -1,20 +1,12 @@
 //! The engine's built-in durable-log record format: an [`Event`] ↔ bytes codec.
 //!
-//! The engine is payload-agnostic (`DESIGN.md` §2): it maps an [`Event`] to and
+//! The engine is payload-agnostic: it maps an [`Event`] to and
 //! from JSON and nothing more. The *envelope* — which record kind this is, and
-//! the store-assigned timestamp it carries — belongs to whoever owns the log,
-//! which is `dogwood-server`'s `record` module.
-//!
-//! # One format for the wire and the log
-//!
-//! Reusing the wire shape rather than inventing a second on-disk encoding means
-//! recovery decodes exactly what was accepted — there is no second conversion
-//! that could drift from the first and make a replayed verdict differ from the
-//! live one. It also keeps the log inspectable.
+//! the store-assigned timestamp it carries — belongs to whoever owns the log.
 //!
 //! # Where the timestamp comes from
 //!
-//! The wire event carries none; the store assigns it (`DESIGN.md` §3.3). The
+//! The store assigns it. The
 //! *record* carries it, because the assigned value is part of the durable fact — a
 //! replay must reconstruct the same trace order and window ages it saw live, so
 //! re-stamping at recovery time (with wall-clock, long after the fact) would
@@ -248,18 +240,6 @@ fn array_values_to_record(items: &Vec<Value>) -> Vec<Json> {
 
 /// Render a Dogwood [`Value`] to its **log-record** JSON: an explicitly tagged
 /// `[tag, payload]` pair.
-///
-/// The record format is tagged where a wire format is inferred, and the
-/// difference is deliberate. On the wire, inference is a convenience for
-/// hand-written clients (`"User::\"alice\""` means an entity, `1.5` means a
-/// decimal) and any ambiguity is resolved once, at admission. A record, by
-/// contrast, must reproduce the admitted `Value` **exactly** — the recovered
-/// trace has to yield the same verdicts as the live one. Any scheme that infers
-/// a type from an untagged payload can be forged by a client that sends the
-/// payload the inference looks for: a sentinel string prefix would let the
-/// literal text `__dec:1.5` come back as a decimal, and re-inferring entity
-/// shape would let the string `"User::\"alice\""` come back as an entity.
-/// Tagging removes the possibility rather than trying to escape around it.
 fn value_to_record(value: &Value) -> Json {
     let result = match value {
         Value::Null => tagged_record("z", Json::Null),
@@ -443,19 +423,12 @@ fn restore_context_fields(
     Ok(builder)
 }
 
-/// Serialize an [`Event`] to its log record: the assigned timestamp plus the
-/// event in wire shape.
-///
-/// The scope principal/resource are read from the event's own accessors, and the
-/// logged record from [`Event::logged_leaves`] — a schema-free enumeration of
-/// every field the event carries at its dotted path, with no privileged
-/// treatment of any group name (`DESIGN.md` §3.4).
 /// An [`Event`]'s **content** as JSON, without the log envelope around it.
 ///
 /// Exposed because the envelope and the payload belong to different owners. The
 /// mapping below — grouped logged fields, the scope aliases, tagged `Value`s — is
 /// frontend knowledge and lives here. What a *record* looks like is the caller's
-/// concern (`DESIGN.md` §2), and a caller logging more than events needs to build
+/// concern, and a caller logging more than events needs to build
 /// its own envelope around this rather than re-deriving the mapping.
 ///
 /// The event's timestamp is deliberately NOT included: it orders the record, so
@@ -1134,9 +1107,7 @@ mod tests {
         );
     }
 
-    /// A malformed payload is an error, not a panic. The *envelope* cases — a
-    /// record with no `ts`, or no `event` — moved to `dogwood-server`'s `record`
-    /// module along with the envelope itself.
+    /// A malformed payload is an error, not a panic.
     #[test]
     fn malformed_payloads_are_rejected() {
         for bad in [

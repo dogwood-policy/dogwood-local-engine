@@ -1,17 +1,10 @@
 [workspace]
 resolver = "2"
-# The local half of the Dogwood monitor stack, extracted from dogwood-language.
 members = [
-    # The single-machine engine: an event-sourced, incremental temporal monitor
-    # implementing `dogwood_language::TemporalEngine` over a durable local event
-    # log — the no-AWS counterpart to the DSQL/Aurora backend.
-    # Embeddable as a library. See its `DESIGN.md`.
+    # The engine library.
     "dogwood-local-engine",
-    # The server binary (`dogwood-server`): a local service built on
-    # `dogwood-local-engine` that owns the policy set and event log behind a
-    # process boundary, exposing a `submit` wire API and a privileged control
-    # plane over Unix sockets. The security-bearing deliverable; the engine is
-    # the lower-trust embeddable core beneath it.
+    # A demo service that puts the engine behind Unix sockets with a separate
+    # control plane. Not for production use.
     "dogwood-server",
     # The benchmark harness: deterministic workloads plus a uniform driver for
     # each implementation, comparing the frontend's in-memory reference engine

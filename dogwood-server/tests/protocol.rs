@@ -292,7 +292,7 @@ fn malformed_bodies_are_decode_errors() {
 /// **The verb split.** A control request must not deserialize as a data request.
 ///
 /// This is the type-level layer of the three that keep policy authoring off the
-/// agent's socket (`DESIGN.md` §8.1): even if the socket mode and the uid
+/// agent's socket: even if the socket mode and the uid
 /// allowlist both failed, an `apply` sent to the data socket cannot be
 /// interpreted as anything the data handler will act on, because `DataRequest`
 /// has no such variant.
@@ -328,8 +328,8 @@ fn control_verbs_do_not_deserialize_as_data_requests() {
 }
 
 /// A `WireEvent` carries **no timestamp field**, so a client cannot assign or
-/// forge one — the store stamps every event at the append point (`DESIGN.md`
-/// §3.3). A client-supplied timestamp would let a caller backdate an event out of
+/// forge one — the store stamps every event at the append point.
+/// A client-supplied timestamp would let a caller backdate an event out of
 /// a window, or reorder itself relative to another caller.
 #[test]
 fn wire_events_cannot_carry_a_client_timestamp() {

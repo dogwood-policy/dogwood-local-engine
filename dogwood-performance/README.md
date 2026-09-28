@@ -6,9 +6,7 @@ the **durable server** (`dogwood-server`), across policy count (10 / 100 / 1000 
 10 000), session pinning (on / off, by predicate shape), and concurrent request rate
 (1 → 500 rps).
 
-> **Looking for the numbers and what they mean?** See **[RESULTS.md](RESULTS.md)** —
-> the findings, with the caveats and known confounds spelled out. This file is the
-> harness: how to run it and why each benchmark is built the way it is.
+> This file is the harness: how to run it and why each benchmark is built the way it is.
 
 ## Running it
 
@@ -124,7 +122,7 @@ floor no amount of filtering removes.
 So pinning is worth up to ~2.8× on scan-heavy policies with many concurrent
 sessions, and is a small tax on already-selective ones. Its non-performance value
 is unchanged and arguably larger: an unforgeable correlation, and the property that
-makes the stream partitionable at all (`DESIGN.md` §3.3).
+makes the stream partitionable at all.
 
 ### Policy installation (what `policy apply` costs)
 
@@ -200,13 +198,13 @@ Three levers, in the order they are likely to pay:
    100 → 10 progression above shows how directly.
 2. **Pinning, on scan-heavy policies with many sessions** — up to ~2.8× per the
    sweep above.
-3. **Pin-sharded instances** (`DESIGN.md` §3.3). This is the only lever that moves
+3. **Pin-sharded instances.** This is the only lever that moves
    the fsync ceiling itself, since each partition gets its own log and therefore its
    own append point. The routing layer exists; running N instances does not yet.
 
 **Group-commit is the untested fourth.** Batching the fsync across concurrent
-submits would raise the storage ceiling without sharding, and §10 anticipated it,
-but it is not implemented — so its value here is a hypothesis, not a number.
+submits would raise the storage ceiling without sharding, but it is not
+implemented — so its value here is a hypothesis, not a number.
 
 ## Design notes
 

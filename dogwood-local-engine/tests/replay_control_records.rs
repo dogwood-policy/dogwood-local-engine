@@ -2,11 +2,11 @@
 //!
 //! A durable verb record is re-applied at its own position in the order,
 //! through the same composite `(id, clause ordinal)` transplant a live batch
-//! uses (`POLICY_INSTALL_SEMANTICS.md` §2.3, §2.6). These tests hand-write the
+//! uses. These tests hand-write the
 //! records — that is the point of testing the path before anything depends on
 //! it — and cover the three retention outcomes that matter:
 //!
-//! - **Update** — the same id, new content, "update means reset" (§2.2), so
+//! - **Update** — the same id, new content, "update means reset", so
 //!   the old window does not carry even for an unchanged clause.
 //! - **Reset** — the same id, unchanged content, cleared history: the case a
 //!   content diff cannot express, unlocked by the composite-key retention.
@@ -14,7 +14,7 @@
 //!   named by any verb keeps its accumulated window.
 //!
 //! Each verb targets a **single** policy by id. `install`'s multi-statement
-//! source is split into one entry per top-level policy (§2.4), so an `Update`
+//! source is split into one entry per top-level policy, so an `Update`
 //! record's `statement` must be exactly *one* canonical policy.
 
 use dogwood_language::{Event, EventBuilder, Value};
@@ -95,7 +95,7 @@ fn next_record_timestamp(log: &DurableLog) -> i64 {
 }
 
 /// A replayed **Update** re-uses the same [`PolicyId`] but resets its history
-/// (§2.2 "update means reset"), even when the new statement's temporal clause
+/// ("update means reset"), even when the new statement's temporal clause
 /// is textually identical to the old one.
 ///
 /// Update targets id 1 (the temporal forbid) with the same forbid text.
@@ -212,8 +212,8 @@ fn replaying_an_add_installs_the_new_policy_fresh_and_keeps_the_others() {
     let _ = std::fs::remove_dir_all(store.parent().unwrap());
 }
 
-/// A verb nullified by a later one in the log folds away on replay (§2.6:
-/// "a nullified verb is just ordinary history that folds away"). An `Add`
+/// A verb nullified by a later one in the log folds away on replay
+/// ("a nullified verb is just ordinary history that folds away"). An `Add`
 /// followed by a `DeleteAll` must leave the set empty after recovery — the Add
 /// contributed nothing.
 #[test]

@@ -240,7 +240,6 @@ fn run(cli: &Cli, paths: &Paths) -> Result<(), String> {
                 eprintln!("  control uids: {:?}", allowlist.uids());
                 // The uid prerequisite is the one deployment fact that determines
                 // whether the boundary is real, so it is stated at every start
-                // rather than left in the design doc.
                 eprintln!(
                     "\nnote: tamper-resistance requires the monitored agent to run as a \
                      DIFFERENT,\n      lower-privileged uid than this server. Same uid, no \

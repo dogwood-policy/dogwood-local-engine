@@ -1,6 +1,5 @@
 //! Compact, reversible binary codec for the incremental monitors' derived
-//! state — the bytes stored in the durable log's snapshot slot (`DESIGN.md`
-//! §6.3).
+//! state — the bytes stored in the durable log's snapshot slot.
 //!
 //! # Why a hand-rolled codec
 //!

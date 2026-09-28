@@ -79,7 +79,7 @@ fn cross_check(pinning: Pinning) {
 
     // Compare shape: which events decided, and how many allows. Exact per-event
     // equality is not required because the server assigns its own timestamps
-    // (`DESIGN.md` §3.3) while the reference uses the generated ones, so
+    // while the reference uses the generated ones, so
     // window-edge cases can legitimately differ. Shape equality still catches the
     // failure that matters — a correlation that never matches at all.
     let ref_decided: Vec<bool> = reference.iter().map(|v| v.is_some()).collect();

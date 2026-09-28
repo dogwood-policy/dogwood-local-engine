@@ -1,8 +1,8 @@
-//! Native pin partitioning at the SERVER level (PARTITION_DESIGN.md §4.1):
+//! Native pin partitioning at the SERVER level:
 //! auto-enabled whenever the schema declares universal symmetric pins
 //! (the default event schema pins `callerPrincipal`).
 //!
-//! Verdicts CANNOT distinguish the modes — the relativization theorem
+//! Verdicts CANNOT distinguish the modes — the relativization rewrite
 //! makes relativized-global and native-partitioned verdict-equivalent by
 //! design, and the whole existing suite referees that equivalence just by
 //! passing. What these tests pin is that partitioning is actually LIVE
@@ -202,7 +202,7 @@ fn inconsistent_outer_clock_degrades_to_an_unpruned_full_log() {
 /// keyed-state transplant (the partitioned mode-matrix path). Under the
 /// verb-batch model "keep the existing policies" means a batch that does not
 /// name them — here `[Add(unrelated)]`, which reborns only the new policy and
-/// leaves every existing per-principal window intact (§2.2).
+/// leaves every existing per-principal window intact.
 #[test]
 fn a_batch_add_carries_shards_through_the_keyed_transplant() {
     let p = path("apply");
@@ -222,7 +222,7 @@ fn a_batch_add_carries_shards_through_the_keyed_transplant() {
         before,
         "the keyed transplant must carry every shard across the change"
     );
-    // Scalar equality can hide a lost+gained pair (review F6): assert
+    // Scalar equality can hide a lost+gained pair: assert
     // the HISTORY carried by VERDICT — alice's and bob's pre-apply Reads
     // must still gate their Exports, and carol (no Read) must pass.
     let denied = |st: &mut DurableTemporalEngine, who: &str| -> bool {

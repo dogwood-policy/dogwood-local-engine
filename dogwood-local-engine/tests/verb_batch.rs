@@ -1,5 +1,5 @@
-//! The verb-batch policy-management surface (`POLICY_INSTALL_SEMANTICS.md`
-//! §2.1): `install` (whole-set) + `batch` (Add/Update/Delete) over stable
+//! The verb-batch policy-management surface:
+//! `install` (whole-set) + `batch` (Add/Update/Delete) over stable
 //! engine-minted ids, plus the `list`/`get_policy` reads. Exercises the real
 //! `expanded_source` canonicalization and — the key durability guarantee —
 //! that a policy's id survives a restart.
@@ -151,7 +151,7 @@ fn batch_add_update_delete_over_stable_ids() {
     let (h0, h1) = (tok(&engine, 0), tok(&engine, 1));
 
     // Add mints a new policy (ordinal 2), keeping the others — and the batch
-    // returns the handle it minted so the caller can address it later (§2.5).
+    // returns the handle it minted so the caller can address it later.
     let result = engine
         .batch(vec![Verb::Add {
             policy: THIRD.to_string(),
@@ -204,7 +204,7 @@ fn batch_add_update_delete_over_stable_ids() {
 
 #[test]
 fn add_slices_a_multi_policy_source_and_update_rejects_one() {
-    // §2.4/AVP: `Add` is a bulk add — a multi-policy source slices into one entry
+    // `Add` is a bulk add — a multi-policy source slices into one entry
     // (and one minted id) per policy. `Update` targets a single id, so a
     // multi-policy source is rejected.
     let dir = store("slice");
@@ -261,7 +261,7 @@ fn add_slices_a_multi_policy_source_and_update_rejects_one() {
 
 #[test]
 fn a_multi_add_batch_returns_minted_ids_in_listed_order() {
-    // §2.5: each `Add` is assigned an id and the batch returns them in the order
+    // Each `Add` is assigned an id and the batch returns them in the order
     // the Adds were listed, so `minted[k]` is the k-th Add's id. Verbs that mint
     // nothing (Delete/Reset/…) do not contribute an entry.
     let dir = store("minted_order");
@@ -308,7 +308,7 @@ fn a_multi_add_batch_returns_minted_ids_in_listed_order() {
 
 #[test]
 fn reset_and_reset_all_are_accepted() {
-    // Under the composite (id, clause-index) transplant (§2.3), a Reset marks a
+    // Under the composite (id, clause-index) transplant, a Reset marks a
     // policy `fresh` and its window drops on the next rebuild — content
     // unchanged, id unchanged. This is exactly what the retention model gives
     // up when it stops inferring intent from a content diff.
@@ -363,7 +363,7 @@ fn policy_ids_survive_a_restart() {
     }
 
     // Reopen: recovery replays the records, and the durably-recorded ordinals AND
-    // handles must be restored exactly — not re-minted from position (§2.4).
+    // handles must be restored exactly — not re-minted from position.
     let engine = DurableTemporalEngine::open(&dir, 0).expect("reopens");
     let ids: Vec<PolicyId> = engine.list().iter().map(|e| e.id).collect();
     assert_eq!(
@@ -381,14 +381,14 @@ fn policy_ids_survive_a_restart() {
 
 #[test]
 fn a_batch_is_one_timestamp_instant_that_survives_a_replay_restart() {
-    // Option A (§2.5): a batch is atomic — "sequential in meaning, transactional
+    // A batch is atomic — "sequential in meaning, transactional
     // in effect" — so it is ONE instant. Every policy it touches shares one
     // store-assigned created/updated, and that value is exactly what the durable
     // records carry. So a restart that rebuilds the set from the log (no snapshot)
     // reports byte-identical metadata: replay stamps each entry from its record's
     // ts, which is the batch's single `now`.
     //
-    // The recovery assertions below are the discriminating ones. Before Option A
+    // The recovery assertions below are the discriminating ones. Previously
     // the live set stamped a flat `now` while the records advanced per-record, so
     // the second add and the update came back with *larger* timestamps after a
     // replay than `list()` had reported live — `list()` disagreeing with itself
@@ -458,7 +458,7 @@ fn a_batch_is_one_timestamp_instant_that_survives_a_replay_restart() {
         (install_ts, batch_ts)
         // Dropped WITHOUT a checkpoint: recovery replays the log rather than
         // loading a snapshot, so it re-stamps every entry from its record's ts —
-        // the path Option A brings into agreement with the live set.
+        // the path that must agree with the live set.
     };
 
     // Reopen and compare: every entry's created/updated must match what `list()`
@@ -487,7 +487,7 @@ fn a_batch_is_one_timestamp_instant_that_survives_a_replay_restart() {
 
 #[test]
 fn re_install_continues_the_mint_cursor_never_reusing_an_id() {
-    // §2.4: a stable id must never be reused. A declarative re-install wipes the
+    // A stable id must never be reused. A declarative re-install wipes the
     // set (`[DeleteAll; Add each]`) but must *continue* the cursor — otherwise a
     // fresh policy could take an id a caller still holds for a since-deleted one.
     let dir = store("reinstall_cursor");
@@ -532,7 +532,7 @@ fn re_install_continues_the_mint_cursor_never_reusing_an_id() {
 
 #[test]
 fn the_mint_cursor_continues_after_a_restart() {
-    // §2.4: a restart must never re-mint — the next id continues past every id
+    // A restart must never re-mint — the next id continues past every id
     // ever assigned, even ones since deleted or wiped. This is the durable
     // counterpart of the `PolicySet` unit test; it checks the recovery wiring
     // (recorded ids advancing `next_id`, and Delete/DeleteAll preserving it).
@@ -568,7 +568,7 @@ fn the_mint_cursor_continues_after_a_restart() {
             "the mint cursor continues past the restart, never re-minting"
         );
         // Wipe everything, restart again, and add: the cursor still continues
-        // (DeleteAll keeps the monotone cursor, §2.1).
+        // (DeleteAll keeps the monotone cursor).
         engine.batch(vec![Verb::DeleteAll]).expect("delete all");
     }
     {

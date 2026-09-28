@@ -1,9 +1,9 @@
-//! The `SetActionSchema` verb (`POLICY_INSTALL_SEMANTICS.md` §2.7).
+//! The `SetActionSchema` verb.
 //!
 //! The action schema is the **mutable** half of the bundle: unlike the event
 //! schema and macros (store config, immutable through the verbs — see
 //! `shard_routing.rs` and the store-config slot), a `SetActionSchema` verb
-//! revalidates and re-lowers the whole set in place. §2.7's contract is precise:
+//! revalidates and re-lowers the whole set in place. The contract is precise:
 //!
 //! - the action schema drives *validation* and a rule's scope / `target_actions`
 //!   — **not** how a leaf's temporal condition lowers (that keys on the event
@@ -20,13 +20,13 @@
 //!
 //! These tests exercise that behaviourally — what validates, what decides, what
 //! survives a restart — since the engine exposes no schema getter (a `GetSchema`
-//! read verb, §2.1, is a later wire concern). Each is written to fail if
+//! read verb is a later wire concern). Each is written to fail if
 //! `SetActionSchema` were a no-op, reset history, or leaked a rejected change.
 //!
-//! **Deliberately out of scope:** the §2.7 "it still typechecks" caveat — a
+//! **Deliberately out of scope:** the "it still typechecks" caveat — a
 //! `context` field type change (e.g. `String → Long`) that keeps every predicate
 //! valid, so re-lowering carries a window whose stored values then go *inert*
-//! against the new type. §2.7 argues this is no less sound than the reset it
+//! against the new type. This is no less sound than the reset it
 //! replaces, and it is a property of the frontend interpreter's variant-strict
 //! evaluation (`value.rs` `dom_eq`), not of this engine's verb handling. Testing
 //! it belongs with the language, not here.
@@ -40,7 +40,7 @@ use dogwood_local_engine::{
 //
 // Three action schemas over the same entities, differing only in which actions
 // they declare — so a schema change is purely a change to the action surface,
-// the thing §2.7 says is safe to re-lower under.
+// the thing that is safe to re-lower under.
 
 /// Base: `Read` + `Export`. The temporal fixtures below reference both.
 const SCHEMA_RE: &str = r#"
@@ -70,7 +70,7 @@ action Login appliesTo {
 "#;
 
 /// `Read` only — **drops `Export`**, which the fixtures reference, so re-lowering
-/// the retained set under it must fail (§2.7's incompatible case).
+/// the retained set under it must fail (the incompatible case).
 const SCHEMA_R: &str = r#"
 entity User;
 entity Doc;
@@ -181,7 +181,7 @@ fn set_action_schema_widens_the_validation_surface() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **The core §2.7 property: a `SetActionSchema` alone keeps every window.**
+/// **The core property: a `SetActionSchema` alone keeps every window.**
 ///
 /// A history-gated forbid is armed (a doc is read, then denied export). An
 /// additive schema change must not reset it: the same doc is still denied
@@ -317,7 +317,7 @@ fn a_rejected_set_action_schema_batch_is_atomic() {
     let _ = std::fs::remove_file(&dir);
 }
 
-// ─── The "grow the surface" workflow (§2.7) ──────────────────────────
+// ─── The "grow the surface" workflow ────────────────────────────────
 
 /// `[SetActionSchema(augmented); Add(policy about the new action)]` in one batch
 /// adds the action and the policy while keeping every existing window — the
@@ -553,7 +553,7 @@ fn a_rejected_append_leaves_the_set_and_schema_intact() {
 /// In a batch that both changes the schema and `Update`s one policy, only the
 /// updated policy resets; a policy the batch does not name keeps its window.
 /// This isolates that `SetActionSchema` itself carries state (the reset comes
-/// from the `Update`, per §2.2), even inside a mixed batch.
+/// from the `Update`), even inside a mixed batch.
 #[test]
 fn set_action_schema_carries_while_a_sibling_update_resets() {
     // Two independent history-gated forbids, on different decision actions but
@@ -586,7 +586,7 @@ action Delete appliesTo { principal: User, resource: Doc, context: { input: { do
     assert!(!decide(&mut engine, "Delete", "target"), "delete denied");
 
     // One batch: change the (additive-compatible) schema AND update the export
-    // forbid (same text — an "update means reset", §2.2). The delete forbid is
+    // forbid (same text — an "update means reset"). The delete forbid is
     // untouched.
     let export_forbid = tok(&engine, 1);
     engine

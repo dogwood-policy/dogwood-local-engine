@@ -8,8 +8,7 @@
 //! caller must not be able to reach into a running authorizer and mutate the
 //! monitor out from under a decision. But the server needs one thing from the
 //! engine that the authorizer will never ask for — to *read* its derived state
-//! for a snapshot (`DESIGN.md` §6.3) and its keyed state for a policy change
-//! (§9.1).
+//! for a snapshot and its keyed state for a policy change.
 //!
 //! # The approach
 //!
@@ -18,7 +17,7 @@
 //! handle, so the server can snapshot without the frontend growing an accessor
 //! that would let *any* consumer mutate a live monitor.
 //!
-//! This adds no locking beyond what §3.3 already requires. The caller serializes
+//! This adds no locking beyond what the engine already requires. The caller serializes
 //! every `submit` behind its own lock (the "one caller-held mutex" model of
 //! [`DurableTemporalEngine`](crate::DurableTemporalEngine)), so this mutex is
 //! never contended on the decision path; it exists to make the shared ownership
@@ -58,7 +57,7 @@ impl SharedEngine {
     /// Run `f` against the engine.
     ///
     /// A poisoned mutex means a previous holder panicked mid-operation, so the
-    /// monitor's state may be torn. The state is *derived* (`DESIGN.md` §3), so
+    /// monitor's state may be torn. The state is *derived*, so
     /// the recovery for that is to rebuild from the log — never to read the torn
     /// state as if it were sound. Hence `None` rather than `unwrap()`: callers
     /// treat it as "no state available", which for a snapshot means skip and for
@@ -85,7 +84,7 @@ impl TemporalEngine for SharedEngine {
         // `LocalTemporalEngine::prepare` rebuilds the monitors from scratch,
         // which would DISCARD the state the server just transplanted — so
         // re-preparing here would silently reset every rule's window on every
-        // policy apply, the exact §9.1 bug. Report success without touching the
+        // policy apply. Report success without touching the
         // engine; the leaves are already installed and identical.
         let _ = (leaves, schema, events);
         Ok(())
@@ -93,8 +92,8 @@ impl TemporalEngine for SharedEngine {
 
     fn observe(&mut self, event: &Event) {
         // A poisoned lock drops the event rather than panicking the connection.
-        // The event is already durable in the log at this point (the server
-        // appends first), so recovery replays it — the in-memory miss is
+        // The event is already durable in the log at this point, so recovery
+        // replays it — the in-memory miss is
         // repaired by a restart, and meanwhile decisions fail closed because the
         // window is short, not because it is wrong.
         let _ = self.with_mut(|engine| engine.observe(event));

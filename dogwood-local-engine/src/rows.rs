@@ -4,25 +4,6 @@
 //! operators compose by joining, projecting and comparing relations, and
 //! [`crate::incremental`] maintains those relations incrementally over a
 //! windowed timeline rather than rebuilding them by scanning.
-//!
-//! This module used to also hold a full scan interpreter — a transcription of
-//! the frontend's reference semantics that evaluated a condition by rescanning
-//! the whole retained trace, reached whenever a leaf could not be compiled
-//! incrementally. It is gone, and the reasoning is worth keeping:
-//!
-//! * Every condition the incremental compiler declined was an unexpanded macro
-//!   artefact, and the scan interpreter *panicked* on all of them. So the two
-//!   were never a fast path and a slow path — they covered the same language,
-//!   and the fallback was a panic waiting for the first decision. `prepare` now
-//!   refuses such a policy set outright.
-//! * Keeping it as "the reference semantics" was not worth it either. The real
-//!   reference is the frontend's own interpreter, and `tests/corpus_diff.rs`
-//!   already differentially tests every passing corpus case against it. A third
-//!   implementation that nothing called and nothing checked could only rot while
-//!   implying a guarantee it did not provide.
-//!
-//! Removing it also let the retained trace stop being `Vec<Event>`: the scan was
-//! the only reader of any event but the most recent.
 
 use std::collections::HashMap;
 
@@ -40,9 +21,7 @@ pub(crate) type Row = Vec<(String, Value)>;
 /// cheap.
 ///
 /// **Small-relation fast path.** Below [`INDEX_THRESHOLD`] distinct rows it is a
-/// plain `Vec` scanned linearly on insert — identical cost to the prior
-/// `!rows.iter().any(rows_eq)` code, and *no* hash allocation. That keeps the
-/// common boolean case (0–1 rows per timepoint) exactly as it was. Only once a
+/// plain `Vec` scanned linearly on insert, and *no* hash allocation. Only once a
 /// relation grows past the threshold (a wide aggregate window) does it build the
 /// hash index and switch to O(1)-amortized inserts, turning the operators'
 /// O(n²) dedup into O(n) where it matters.

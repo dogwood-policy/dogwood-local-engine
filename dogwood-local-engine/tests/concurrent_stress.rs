@@ -1,7 +1,7 @@
 //! Many concurrent callers submitting decisions at once: nothing lost or
 //! duplicated, and the recovered store agrees with the reference oracle.
 //!
-//! The server serializes every submit behind one lock (`DESIGN.md` §3.3), so
+//! The server serializes every submit behind one lock, so
 //! concurrent callers line up single-file. This test checks that under real
 //! contention nothing falls through the cracks — no event is double-counted, none
 //! is lost, and the recovered verdict matches the reference interpreter.
@@ -129,7 +129,7 @@ fn run_scenario(tag: &str, callers: usize, each: usize) {
     };
 
     // Enumerate every offset each op wrote: an event is one, an apply is the
-    // whole contiguous range of its per-verb records (§2.6 — schemas, DeleteAll,
+    // whole contiguous range of its per-verb records (schemas, DeleteAll,
     // one Add per policy).
     let mut offsets: Vec<u64> = promises
         .ops

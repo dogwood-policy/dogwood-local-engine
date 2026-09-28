@@ -1,14 +1,13 @@
-//! The aggregate-memo battery (MEMO_DESIGN.md §5). Layers:
+//! The aggregate-memo battery. Layers:
 //!
-//! PRECONDITIONS (green BEFORE the memo lands — if red, the memo's
-//! soundness premises are broken and that is a pre-existing engine bug):
+//! PRECONDITIONS (the memo's soundness premises):
 //!   U1 append-invariance, U2 prune-transparency.
-//! THE MEMO ITSELF (red until implemented):
+//! THE MEMO:
 //!   U3 memo-across-pruning, U4 hit rate, U5 memoized None, U6 dom_eq
 //!   keys, U7 clone reset, U8 snapshot reopen, U9 external free keys
-//!   (the R2/R5 soundness channel), U10 nested-agg no deadlock,
+//!   U10 nested-agg no deadlock,
 //!   U11 kill-switch equivalence, S1 the 29-policy differential.
-//! SCALE (#[ignore], release, the per-CR checklist):
+//! SCALE (#[ignore], release):
 //!   S2 growth ratio (corr_agg_in_window), S4 worst-case overhead.
 //!
 //! Two-lane discipline: `engines()` returns (memo-ON, memo-OFF) engines;
@@ -190,7 +189,7 @@ fn three_lane(policy: &str, events: &[(Event, bool)]) -> LocalTemporalEngine {
 // ── policies ────────────────────────────────────────────────────────────
 
 /// The sweep shape (agg under the outer formerly): REAL cross-decide
-/// reuse — the memo's target (design §3.1).
+/// reuse — the memo's target.
 const AGG_UNDER_SWEEP: &str = r#"permit (principal, action == Test::Action::"Read", resource)
 when temporal {
     exists (u: String). (formerly within 24h (Test::Action::"Login"::response{ input.user: u, output.result: true }
@@ -198,7 +197,7 @@ when temporal {
 };"#;
 
 /// Root-conjunct correlated aggregate: point-eval at cur — NO
-/// cross-decide reuse expected (design §3.1 [R1]); still must be
+/// cross-decide reuse expected; still must be
 /// semantically identical in both lanes.
 const AGG_ROOT: &str = r#"permit (principal, action == Test::Action::"Read", resource)
 when temporal {
@@ -253,7 +252,7 @@ fn sweep_trace() -> Vec<(Event, bool)> {
 
 // ── U1/U2: PRECONDITIONS (must be green before the memo lands) ─────────
 
-/// U1 (design §4.1): occ at a past timepoint is invariant to appends.
+/// U1: occ at a past timepoint is invariant to appends.
 /// Two identically-prepared engines; one decides DURING the trace, the
 /// other decides only at the end via replay: every shared decision
 /// point must agree. (Public-API formulation: verdicts at time T are a
@@ -299,7 +298,7 @@ fn u1_append_invariance() {
     }
 }
 
-/// U2 (design §4.2): pruning is semantics-transparent — the engine
+/// U2: pruning is semantics-transparent — the engine
 /// (which prunes at max_window = the NESTED SUM) agrees with the
 /// oracle (which retains everything) on a trace long enough that
 /// pruning fires, including probes at the horizon boundary.
@@ -335,7 +334,7 @@ fn u2_prune_transparency() {
 
 // ── U3–U11: the memo battery ────────────────────────────────────────────
 
-/// U3 (§4.4): memo entries keyed by tp_id survive pruning; decides
+/// U3: memo entries keyed by tp_id survive pruning; decides
 /// straddling a prune agree with the memo-OFF lane. (Fails if keyed by
 /// timeline INDEX — indices rebase on drain.)
 #[test]
@@ -370,7 +369,7 @@ fn u3_memo_survives_pruning() {
     three_lane(NESTED_WINDOWS, &ev);
 }
 
-/// U4 (§2.8, pitfall 2): the sweep shape actually HITS — guards the
+/// U4: the sweep shape actually HITS — guards the
 /// Arc::make_mut clone pattern silently emptying the memo every observe.
 #[test]
 fn u4_memo_hit_rate() {
@@ -386,7 +385,7 @@ fn u4_memo_hit_rate() {
     );
 }
 
-/// U5 (renamed per review F4): repeated identical probes HIT the cache
+/// U5: repeated identical probes HIT the cache
 /// — including for keys whose data is absent (u1). NOTE: the Agg path
 /// always yields Some(Int) (project_count/sum never fail), so the
 /// memoized-None branch is defensively dead today; this pins the
@@ -420,7 +419,7 @@ fn u5_repeat_probes_hit() {
     assert!(hits > 0, "repeated identical probes should hit");
 }
 
-/// U6 (§2.2 [R4]): dom_eq key semantics — decimal group keys that are
+/// U6: dom_eq key semantics — decimal group keys that are
 /// numerically equal but spelled differently must share a memo entry
 /// (and, above all, never split semantics between the lanes).
 #[test]
@@ -485,7 +484,7 @@ fn u7_clone_resets_memo() {
     }
 }
 
-/// U8 (§5.2 [R7]): save with a WARM memo via the engine snapshot path,
+/// U8: save with a WARM memo via the engine snapshot path,
 /// reload, and agree — the memo is derived state, never serialized.
 #[test]
 fn u8_snapshot_reopen_cold_memo() {
@@ -535,7 +534,7 @@ fn u8_snapshot_reopen_cold_memo() {
     }
 }
 
-/// U9 (§5.2 [R5], the R2/R9 channels): the agg body reads bindings
+/// U9: the agg body reads bindings
 /// from OUTSIDE the aggregate. Variant 1 (DETERMINISTIC catch): the
 /// body correlates on `context.input.user` (the Correlated-arg
 /// channel) — probes for u0 (3 transfers, TRUE) and u1 (1 transfer,
@@ -592,7 +591,7 @@ fn u9_external_free_key_soundness() {
     three_lane(AGG_UNDER_SWEEP, &ev);
 }
 
-/// U10 (§2.5 [R3]): agg-vs-agg comparison — BOTH operands memoize in
+/// U10: agg-vs-agg comparison — BOTH operands memoize in
 /// one compare_rows call; a held lock across the recompute deadlocks.
 /// (Run under the suite's timeout; a hang is the failure signal.)
 #[test]
@@ -639,7 +638,7 @@ fn u11_kill_switch() {
 }
 
 // ── S1: the wide differential (subset in CI; the full 29-case battery
-//    runs via the bench harness — see MEMO_DESIGN.md S1) ───────────────
+//    runs via the bench harness) ───────────────
 
 /// S1 (CI slice): the four agg policies × the sweep trace, three-lane.
 #[test]
@@ -649,12 +648,12 @@ fn s1_differential_slice() {
     }
 }
 
-// ── scale (#[ignore]; release; the per-CR checklist) ────────────────────
+// ── scale (#[ignore]; release) ──────────────────────────────────────────
 
-/// S2 [R6, amended after first measurement]: the SWEEP shape. The memo
+/// S2: the SWEEP shape. The memo
 /// removes the QUADRATIC term (the per-anchor window refold); what
 /// remains is the And loop's per-anchor scan — LINEAR in state by
-/// design (§3.1: "lookups + O(new j) refolds" per decide). So the
+/// design ("lookups + O(new j) refolds" per decide). So the
 /// assertions are: (a) memo-ON beats memo-OFF ≥ 5× at state 2000,
 /// (b) growth over 4× state stays ~linear (< 6), i.e. no quadratic
 /// term reappears, (c) hits dominate. First measurement: OFF was

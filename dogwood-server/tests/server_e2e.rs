@@ -2,9 +2,9 @@
 //!
 //! These drive the server the way a deployment does — install a policy through
 //! the control plane, submit events on the data plane, restart, apply a new
-//! policy — and assert the properties `DESIGN.md` promises: durability across a
-//! restart, prospective installs (§9), atomic swap (§8), the verb split (§8.1),
-//! and store-assigned timestamps (§3.3).
+//! policy — and assert the properties the design promises: durability across a
+//! restart, prospective installs, atomic swap, the verb split,
+//! and store-assigned timestamps.
 //!
 //! The server is run in-process on a thread rather than as a subprocess: same
 //! code path, but a failure surfaces as an assertion instead of a parsed stdout,
@@ -99,7 +99,7 @@ impl TestServer {
     /// Start a server in an existing directory (for restart tests).
     fn start_in(dir: PathBuf) -> Self {
         let paths = Paths::new(&dir);
-        // `snapshot_interval: 3` so the periodic-snapshot path (§6.3) is
+        // `snapshot_interval: 3` so the periodic-snapshot path is
         // exercised by these short traces rather than only by the default 10k.
         // A 1s idle timeout (vs. the 30s default) lets the flood test observe slot
         // reclamation without waiting out production timing; every other test
@@ -344,7 +344,7 @@ fn temporal_rules_see_history_across_submissions() {
 /// **Durability.** State survives a full server restart: history recorded before
 /// the stop still drives verdicts after it.
 ///
-/// This is the property event sourcing exists for (`DESIGN.md` §3) — and the one
+/// This is the property event sourcing exists for — and the one
 /// an in-memory monitor cannot offer. A restart that silently forgot history
 /// would turn every history-gated `forbid` into a pass.
 #[test]
@@ -359,7 +359,7 @@ fn history_and_policy_survive_a_restart() {
     // A brand-new server over the same directory.
     let server = TestServer::start_in(dir);
 
-    // The policy set came back with it — no re-apply needed (§7: the server owns
+    // The policy set came back with it — no re-apply needed (the server owns
     // the policy set, which is only true across a reboot if it is durable).
     match server
         .control()
@@ -394,8 +394,8 @@ fn history_and_policy_survive_a_restart() {
 /// `Delete`, so it stays inert and cannot itself flip a verdict.
 const DELETE_GATED_FORBID: &str = r#"forbid (principal, action == Action::"Read", resource) when temporal { formerly within 24h Action::"Delete"::request{ input.doc: context.input.doc } };"#;
 
-/// **Adding a rule over the wire preserves the existing rule's window** (§9.1,
-/// §2.2 "not mentioned ⇒ untouched").
+/// **Adding a rule over the wire preserves the existing rule's window**
+/// ("not mentioned ⇒ untouched").
 ///
 /// The incremental path is now a real wire verb: `Batch [Add …]` adds a policy
 /// and keeps every policy the batch does not name. The check is behavioural — a
@@ -528,7 +528,7 @@ fn batch_add_update_delete_over_the_wire() {
 }
 
 /// Over the wire, a bulk `Add` slices a multi-policy source into one entry (and
-/// one minted id) per policy (§2.4); an `Update` with >1 policy is rejected.
+/// one minted id) per policy; an `Update` with >1 policy is rejected.
 #[test]
 fn wire_add_slices_and_update_rejects_multi() {
     let server = TestServer::start("wire_slice");
@@ -578,7 +578,7 @@ fn wire_add_slices_and_update_rejects_multi() {
 }
 
 /// `List` paginates over the owned snapshot: `max_results` caps a page and
-/// `next_token` (the handle to resume after) walks the rest (§2.7).
+/// `next_token` (the handle to resume after) walks the rest.
 #[test]
 fn list_paginates() {
     let server = TestServer::start("list_page");
@@ -719,7 +719,7 @@ fn get_policy_by_id_and_get_schema() {
 }
 
 /// `GetSchema` returns the **original** action schema the operator authored, not
-/// the augmented one lowering derives (§2.7). A temporal policy triggers schema
+/// the augmented one lowering derives. A temporal policy triggers schema
 /// augmentation internally (a synthesized `context` field per hoisted leaf), so
 /// this installs one and asserts the returned schema is byte-identical to what
 /// was authored — no synthesized fields leaked back.
@@ -807,7 +807,7 @@ fn wire_append_action_schema_widens_the_surface() {
     }
 }
 
-/// Over the wire, `DeleteAll` is terminal and fail-closed (§2.1): the empty set
+/// Over the wire, `DeleteAll` is terminal and fail-closed: the empty set
 /// stays installed and every decision denies — not a `NoPolicy` error.
 #[test]
 fn wire_delete_all_is_terminal_and_denies() {
@@ -868,7 +868,7 @@ fn wire_reset_and_reset_all_clear_windows() {
     );
 }
 
-/// Over the wire, a mixed batch is atomic (§2.5): a valid `Add` alongside a
+/// Over the wire, a mixed batch is atomic: a valid `Add` alongside a
 /// failing `SetActionSchema` applies nothing.
 #[test]
 fn wire_mixed_batch_is_atomic() {
@@ -900,7 +900,7 @@ fn wire_mixed_batch_is_atomic() {
     );
 }
 
-/// **Atomic swap** (§8): a policy that fails validation is rejected, and the
+/// **Atomic swap**: a policy that fails validation is rejected, and the
 /// previously installed set keeps serving.
 ///
 /// A server left policy-less by a bad apply would be a trivially exploitable
@@ -921,7 +921,7 @@ fn a_rejected_apply_leaves_the_running_set_serving() {
         .expect("apply call");
     match response {
         ControlResponse::Error { message } => {
-            // Server-side validation is the non-negotiable part of §8: a
+            // Server-side validation is non-negotiable: a
             // compromised control client is exactly who would skip a client-side
             // check.
             assert!(
@@ -963,7 +963,7 @@ fn a_rejected_apply_leaves_the_running_set_serving() {
     }
 }
 
-/// **The verb split** (§8.1): the data socket does not serve control verbs.
+/// **The verb split**: the data socket does not serve control verbs.
 ///
 /// Sending an `apply`-shaped payload to the data socket must not install
 /// anything. This is the end-to-end counterpart to the type-level check in
@@ -1009,8 +1009,7 @@ fn the_data_socket_does_not_serve_control_verbs() {
     }
 }
 
-/// **The permission layout is the privilege asymmetry**, so every mode is pinned
-/// (§7, §8.1).
+/// **The permission layout is the privilege asymmetry**, so every mode is pinned.
 ///
 /// The two halves pull in opposite directions and both must hold:
 ///
@@ -1112,7 +1111,7 @@ unsafe fn set_umask(mask: u32) -> u32 {
     unsafe { umask(mask) }
 }
 
-/// **Store-assigned timestamps** (§3.3): the server stamps events, strictly
+/// **Store-assigned timestamps**: the server stamps events, strictly
 /// increasing, regardless of what a client says — and a client cannot say
 /// anything, since `WireEvent` has no timestamp field.
 ///
@@ -1161,7 +1160,7 @@ fn the_store_assigns_strictly_increasing_timestamps() {
 }
 
 /// A history-kind event is acked with an offset and yields no verdict — the
-/// second half of the schema-driven `submit` (§10). Which kinds decide comes from
+/// second half of the schema-driven `submit`. Which kinds decide comes from
 /// the schema, not from a hardcoded name.
 #[test]
 fn history_events_are_recorded_without_a_verdict() {
@@ -1245,7 +1244,7 @@ fn status_reports_the_running_set_with_all_leaves_incremental() {
     }
 }
 
-/// An explicit checkpoint succeeds and reports the offset it covers (§6.3).
+/// An explicit checkpoint succeeds and reports the offset it covers.
 #[test]
 fn checkpoint_reports_the_offset_it_covers() {
     let server = TestServer::start("checkpoint");
@@ -1270,7 +1269,7 @@ fn checkpoint_reports_the_offset_it_covers() {
 
 /// Many concurrent submissions all succeed and are all durably recorded.
 ///
-/// §3.3 expects exactly this load ("an agent might spawn many sub-agents") and
+/// The design expects exactly this load ("an agent might spawn many sub-agents") and
 /// answers it with single-writer-per-instance: callers serialize at the append
 /// point, each emerging with a distinct timestamp. The test's job is to confirm
 /// nothing is dropped or double-counted under contention.
@@ -1307,10 +1306,10 @@ fn concurrent_submissions_are_all_recorded() {
     // Every event reached the log exactly once. A dropped append would show as a
     // low offset; a double append as a high one. The install itself occupies a
     // contiguous *range* of per-verb records — one per policy plus the schema
-    // and `DeleteAll` preamble (`POLICY_INSTALL_SEMANTICS.md` §2.6). For
+    // and `DeleteAll` preamble. For
     // `PLAIN_POLICY` (one policy) the install writes 3 records:
     // `SetActionSchema + DeleteAll + Add`. (The event schema is store config in a
-    // metadata slot, not a log record, §2.7.)
+    // metadata slot, not a log record.)
     const INSTALL_RECORDS: usize = 3;
     match server
         .control()

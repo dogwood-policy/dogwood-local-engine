@@ -1,17 +1,17 @@
 //! Peer-credential attestation: **who is actually connected**, according to the
-//! kernel (`DESIGN.md` §7.2, §8.1).
+//! kernel.
 //!
 //! This is the mechanism the whole trust boundary rests on. Over a Unix domain
 //! socket the kernel reports the connecting process's uid/pid from data the
 //! client never supplies — a caller cannot claim a uid it does not have, the way
 //! it can claim any `principal` it likes inside an event body. Two distinct uses:
 //!
-//! 1. **Control-plane authorization** (§8.1) — the privileged socket accepts
+//! 1. **Control-plane authorization** — the privileged socket accepts
 //!    policy mutations only from an allowlisted uid. This is the *entire*
 //!    authorization scheme for authoring; on a single machine "who may author
 //!    policy" is fully answered by "which OS user are you," and the OS already
 //!    owns that identity and its revocation.
-//! 2. **Trustworthy request context** (§7.2) — the attested uid/pid of a data
+//! 2. **Trustworthy request context** — the attested uid/pid of a data
 //!    caller is ground truth a policy can be written against, unlike the
 //!    self-asserted `principal` in an event.
 //!
@@ -72,10 +72,10 @@ pub fn peer_cred(_stream: &UnixStream) -> Result<PeerCred, String> {
     )
 }
 
-/// The set of uids permitted on the control socket (`DESIGN.md` §8.1).
+/// The set of uids permitted on the control socket.
 ///
 /// The default is the server's own uid — the operator who owns the process, who
-/// §7.1 already places outside the threat model. Additional uids may be
+/// is already outside the threat model. Additional uids may be
 /// configured (e.g. an ops user).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ControlAllowlist {
@@ -116,8 +116,8 @@ impl ControlAllowlist {
 mod tests {
     use super::*;
 
-    /// The default allowlist contains this process's uid and nothing else — the
-    /// §8.1 default. A regression here would silently widen who can author
+    /// The default allowlist contains this process's uid and nothing else.
+    /// A regression here would silently widen who can author
     /// policy.
     #[test]
     fn default_allowlist_is_exactly_the_own_uid() {

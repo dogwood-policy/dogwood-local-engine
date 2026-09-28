@@ -7,7 +7,7 @@
 //! server honest about its own contract.
 //!
 //! The two clients are separate types for the same reason the sockets are
-//! separate (`DESIGN.md` §8.1): a [`DataClient`] has no method that could mutate
+//! separate: a [`DataClient`] has no method that could mutate
 //! policy, so code holding one cannot accidentally be granted authoring reach.
 
 use std::os::unix::net::UnixStream;
@@ -46,7 +46,7 @@ impl ControlClient {
     /// Connect to the control socket at `path`.
     ///
     /// A connection refused with `EACCES` here is the socket's `0700` mode doing
-    /// its job — the caller's uid is not the owner (`DESIGN.md` §8.1, layer 1),
+    /// its job — the caller's uid is not the owner,
     /// so the message says so rather than reporting a bare errno.
     pub fn connect(path: impl AsRef<Path>) -> Result<Self, String> {
         let path = path.as_ref();

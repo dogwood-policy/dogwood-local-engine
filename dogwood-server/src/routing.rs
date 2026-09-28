@@ -1,4 +1,4 @@
-//! Routing a wire event to its partition key (`DESIGN.md` §3.3).
+//! Routing a wire event to its partition key.
 //!
 //! The schema-derived *plan* — what the event stream may be partitioned on — is
 //! [`ShardPlan`], which lives in `dogwood-local-engine` because it is derived

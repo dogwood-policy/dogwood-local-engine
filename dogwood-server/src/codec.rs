@@ -8,7 +8,7 @@
 //!
 //! The mapping stops at an [`EventBuilder`] — an event with content but **no
 //! finalized timestamp** — because the durable engine, not the wire, owns the
-//! clock: it assigns the store timestamp at the append point (`DESIGN.md` §3.3)
+//! clock: it assigns the store timestamp at the append point
 //! and finalizes the builder itself. [`to_event_builder`] is that primitive;
 //! [`to_event`] is a convenience for callers that already hold an explicit
 //! timestamp (recovery, oracle tests).

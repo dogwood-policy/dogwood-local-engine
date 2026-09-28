@@ -1,7 +1,7 @@
 //! The injected [`Clock`] and the monotonic clamp it feeds.
 //!
-//! `DurableTemporalEngine` assigns each record its timestamp from a [`Clock`]
-//! (`DESIGN.md` §3.3). In production that is the system clock; here a
+//! `DurableTemporalEngine` assigns each record its timestamp from a [`Clock`].
+//! In production that is the system clock; here a
 //! [`ManualClock`] lets a test set the instant exactly — and, crucially, step it
 //! *backwards*, which `submit_contract`'s
 //! `the_clock_survives_a_checkpoint_that_empties_the_log` notes it cannot do:

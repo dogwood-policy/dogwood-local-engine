@@ -3,11 +3,12 @@ name = "dogwood-local-engine"
 version = "1.0.0"
 edition = "2024"
 publish.workspace = true
-description = "A single-machine, event-sourced temporal engine for Dogwood: an incremental monitor over a durable local event log, implementing `dogwood_language::TemporalEngine`. The no-AWS counterpart to the DSQL/Aurora backend."
+description = "An evaluation engine for Dogwood's temporal policies."
 license = "Apache-2.0"
 repository = "https://github.com/dogwood-policy/dogwood-local-engine"
 homepage = "https://dogwood-policy.github.io/dogwood/"
 documentation = "https://docs.rs/dogwood-local-engine"
+readme = "README.md"
 keywords = ["authorization", "policy", "temporal", "dogwood"]
 categories = ["authentication"]
 exclude = ["/build", "/Config", "/build-tools/"]
@@ -26,31 +27,18 @@ fault-injection = []
 shuttle = ["fault-injection", "dep:shuttle"]
 
 [dependencies]
-# The Dogwood frontend: the `TemporalEngine` seam this crate implements, plus
-# the temporal-condition AST (`temporal_ast`) the incremental evaluator walks.
-# An intra-workspace `path` dep, but this crate is published, so it also needs a
-# `version`: Cargo builds against the path locally and records the version in
-# the published manifest (cross-package consumers use `dogwood-language =
-# "1.0"` the same way).
+# The Dogwood frontend: the `TemporalEngine` seam this crate implements and
+# the temporal-condition AST the evaluator walks.
 dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0" }
-# The durable event log: a pure-Rust ACID embedded key–value store (no C
-# toolchain, clean cross-compile) — the storage substrate decided in DESIGN.md
-# §6.1. Used only as an append-only log + snapshot store, never as a query
-# engine.
+# The durable event log: a pure-Rust embedded ACID key–value store, used only
+# as an append-only log and snapshot slot.
 redb = "4.1.0"
-# Persisted-format derives: the installed policy bundle, the snapshot payload,
-# and (until the audit log is removed) the audit entry. Same version/features the
-# server already used, so nothing new enters the version set.
+# Persisted-format derives: the installed policy bundle and the snapshot payload.
 serde = { version = "1", features = ["derive"] }
-# The built-in `JsonEventCodec`'s record format: the event's wire JSON plus the
-# store-assigned timestamp (`DESIGN.md` §6.1). Ships as the default codec so a
-# caller can open a `DurableTemporalEngine` without supplying one.
+# The built-in event codec's record format.
 serde_json = "1"
 thiserror = "1"
-# OS entropy for minting opaque policy handles (`PolicyToken`): a random,
-# non-sequential external id so callers cannot couple to the internal ordinal
-# (mirrors AVP's opaque `policyId`). Already in the version set (a transitive
-# dep), so declaring it directly adds nothing new.
+# OS entropy for minting opaque policy handles (`PolicyToken`).
 getrandom = "0.3"
 # Deterministic concurrency scheduler used only when the `shuttle` test feature
 # is explicitly enabled.
@@ -62,8 +50,7 @@ shuttle = { version = "0.9.3", optional = true }
 dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0", features = ["corpus"] }
 
 # The corpus differential: LocalTemporalEngine must agree with the in-memory
-# interpreter oracle on every passing case. The referee for the incremental
-# rewrite (DESIGN.md §5).
+# interpreter oracle on every passing case.
 [[test]]
 name = "corpus_diff"
 path = "tests/corpus_diff.rs"
@@ -76,8 +63,8 @@ name = "incremental_formerly"
 path = "tests/incremental_formerly.rs"
 
 # Content-derived leaf identity: the keying that lets a policy change preserve
-# unchanged rules' accumulated windows while new rules start prospectively
-# (DESIGN.md §9.1). Driven from real parsed policies, since a `Condition` cannot
+# unchanged rules' accumulated windows while new rules start prospectively.
+# Driven from real parsed policies, since a `Condition` cannot
 # be hand-built out of crate.
 [[test]]
 name = "leaf_state_sharing"
@@ -159,7 +146,7 @@ path = "tests/component_breakdown.rs"
 
 # Recovery replays policy CHANGES, not just events: a recorded `Apply` is
 # re-performed at its position through the same content-matched transplant a live
-# apply uses (§9.1), and an undecodable record fails recovery loudly.
+# apply uses, and an undecodable record fails recovery loudly.
 [[test]]
 name = "replay_control_records"
 path = "tests/replay_control_records.rs"

@@ -152,8 +152,8 @@ impl ServerHarness {
     /// `SetActionSchema` with the unchanged schema re-lowers and re-validates the
     /// whole set while carrying every leaf's window (nothing is marked fresh), so
     /// `leaves_retained` is the full leaf count and the transplant is what gets
-    /// timed. An `install` would be reborn-all (`POLICY_INSTALL_SEMANTICS.md`
-    /// §2.1) — it transplants nothing and would return 0.
+    /// timed. An `install` would be reborn-all
+    /// — it transplants nothing and would return 0.
     pub fn reapply(&mut self) -> usize {
         self.state
             .batch(vec![Verb::SetActionSchema {
@@ -173,7 +173,7 @@ impl Drop for ServerHarness {
 /// Render a generated event as a [`WireEvent`].
 ///
 /// Note the absent timestamp: the wire form carries none, because the store
-/// assigns it at the append point (`DESIGN.md` §3.3). The reference driver uses
+/// assigns it at the append point. The reference driver uses
 /// `GenEvent::ts` and the server mints its own, so the two see *different*
 /// absolute times — which is fine for the temporal windows used here (1h, while
 /// the whole benchmark runs in well under that), but is exactly why verdict

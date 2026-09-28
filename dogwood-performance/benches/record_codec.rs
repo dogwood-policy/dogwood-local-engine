@@ -2,13 +2,13 @@
 //!
 //! This benchmark is intended to compare two complete implementations:
 //!
-//! - `65b2f2a`: `json!` encoding and `RecordWire`/`serde_json::from_value`
+//! - the original: `json!` encoding and `RecordWire`/`serde_json::from_value`
 //!   decoding.
-//! - the current verified-shape implementation: explicit JSON-map encoding and
+//! - the current implementation: explicit JSON-map encoding and
 //!   direct strict decoding.
 //!
 //! Apply this same benchmark source to both revisions. Save the original as a
-//! Criterion baseline, then compare the verified implementation against it:
+//! Criterion baseline, then compare the current implementation against it:
 //!
 //! ```text
 //! cargo bench -p dogwood-performance --bench record_codec -- \

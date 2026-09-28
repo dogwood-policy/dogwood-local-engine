@@ -1,8 +1,8 @@
-//! Pin-sharded routing (`DESIGN.md` §3.3): does the server derive a partition
+//! Pin-sharded routing: does the server derive a partition
 //! key when — and *only* when — partitioning is actually sound?
 //!
-//! The correctness theorem itself (per-key evaluation ≡ global evaluation) is the
-//! frontend's, proved by construction via the relativization rewrite and tested in
+//! The equivalence itself (per-key evaluation ≡ global evaluation) is the
+//! frontend's — the relativization rewrite — and is tested in
 //! `dogwood-language/tests/pin_partition_differential.rs`. These tests cover the
 //! half that lives here, which is where a partitioned deployment would actually go
 //! wrong:
@@ -201,7 +201,7 @@ fn a_pin_on_only_one_event_kind_is_not_a_partition_key() {
 /// sharded plan, an unpinned one does not.
 ///
 /// The event schema is store configuration now, fixed at the first install and
-/// immutable thereafter (`POLICY_INSTALL_SEMANTICS.md` §2.7) — changing a pin
+/// immutable thereafter — changing a pin
 /// re-buckets all state, so it is a deliberate store rebuild, not an apply. So
 /// each schema is exercised on its **own** store (the rebuild), and an attempt
 /// to switch the event schema on a live store is asserted to be **rejected**.
@@ -241,7 +241,7 @@ fn shardability_follows_the_stores_event_schema() {
 
 /// The store's event schema is durable: a **custom** (non-default) event schema
 /// configured at install is still in force after a restart, not reverted to the
-/// built-in default (`POLICY_INSTALL_SEMANTICS.md` §2.7 — it lives in a metadata
+/// built-in default (it lives in a metadata
 /// slot, read back at open).
 ///
 /// The default schema *pins* `callerPrincipal` (shardable); `UNPINNED_EVENT_SCHEMA`
@@ -280,7 +280,7 @@ fn a_custom_event_schema_survives_a_restart() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// Re-installing with the **same** event schema is accepted (§2.7): only a
+/// Re-installing with the **same** event schema is accepted: only a
 /// *change* to the store-config schema is rejected, so a declarative re-apply of
 /// an unchanged configuration is a no-op on the config, not an error.
 #[test]
@@ -304,7 +304,7 @@ fn re_installing_with_the_same_event_schema_is_idempotent() {
 
 // ─── Store-config is set once, and only by a *successful* install ────
 
-/// **Positive control** for the set-once rule (§2.7): once an install has
+/// **Positive control** for the set-once rule: once an install has
 /// *succeeded* and locked in an event schema, a later install that would change
 /// it is rejected — the event schema is fixed at store configuration. This is the
 /// mechanism the atomicity tests below prove does *not* fire on a rejected install;
@@ -342,7 +342,7 @@ fn changing_the_event_schema_after_a_successful_install_is_rejected() {
 }
 
 /// **A rejected first install must not lock in its event schema.** The store
-/// config (event schema / macros, §2.7) is written in the *same* transaction as
+/// config (event schema / macros) is written in the *same* transaction as
 /// the policy records it configures, so an install that fails validation persists
 /// nothing — leaving the store free to be configured with a *different* event
 /// schema by a later install. Before the fix, `install` committed the event

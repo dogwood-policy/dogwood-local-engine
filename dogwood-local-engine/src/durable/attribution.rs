@@ -11,7 +11,9 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// directly from the lowered Cedar policy; `id` is an annotation, not the token.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PolicyAttribution {
+    /// The policy's durable handle.
     pub token: PolicyToken,
+    /// The policy's annotations, keyed by name.
     pub annotations: BTreeMap<String, String>,
 }
 
@@ -45,14 +47,17 @@ pub struct DecisionResponse {
 }
 
 impl DecisionResponse {
+    /// The allow-or-deny decision.
     pub fn decision(&self) -> Decision {
         self.decision
     }
 
+    /// Whether the decision is `Allow`.
     pub fn allowed(&self) -> bool {
         self.decision == Decision::Allow
     }
 
+    /// The determining policies and evaluation errors behind the decision.
     pub fn diagnostics(&self) -> &DecisionDiagnostics {
         &self.diagnostics
     }
@@ -71,6 +76,7 @@ impl DecisionDiagnostics {
         self.reason.iter()
     }
 
+    /// The authorizer's evaluation errors, as messages.
     pub fn errors(&self) -> impl Iterator<Item = &str> {
         self.errors.iter().map(String::as_str)
     }

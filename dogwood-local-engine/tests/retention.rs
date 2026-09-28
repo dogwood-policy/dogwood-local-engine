@@ -1,5 +1,5 @@
 //! The `(policy id, clause index)` transplant soundness claims
-//! (`POLICY_INSTALL_SEMANTICS.md` §2.3) — the properties that distinguish the
+//! — the properties that distinguish the
 //! new retention model from the content-keyed one it replaces. Each test is
 //! written to **fail under content-only keying**, so it pins the actual benefit
 //! of scoping retention to the policy id rather than the clause text:
@@ -17,9 +17,9 @@
 //! window flips.
 //!
 //! It also covers two batch-level guarantees that share the same harness: that
-//! `DeleteAll` is **terminal and fail-closed** (§2.1) and that a **rejected
+//! `DeleteAll` is **terminal and fail-closed** and that a **rejected
 //! batch mutates nothing** — no durable record, and no live window cleared even
-//! by a `Reset` that preceded the failing verb (§2.5).
+//! by a `Reset` that preceded the failing verb.
 
 use dogwood_language::{Event, EventBuilder, Value};
 use dogwood_local_engine::{
@@ -108,7 +108,7 @@ fn tok(engine: &DurableTemporalEngine, ordinal: u64) -> PolicyToken {
         .token
 }
 
-/// **No cross-policy sharing** (§2.3): two policies whose temporal clauses are
+/// **No cross-policy sharing**: two policies whose temporal clauses are
 /// byte-identical still have independent windows. Resetting one must not clear
 /// the other.
 ///
@@ -159,7 +159,7 @@ fn identical_clauses_in_different_policies_do_not_share_a_window() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **Delete + re-add starts fresh** (§2.3, §2.2): removing a policy and adding
+/// **Delete + re-add starts fresh**: removing a policy and adding
 /// one with identical content mints a new id and an empty window — the old
 /// history does not resurrect.
 ///
@@ -208,7 +208,7 @@ fn delete_then_readd_identical_content_starts_fresh() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **Position-shift survival** (§2.3): a policy keeps its window when another
+/// **Position-shift survival**: a policy keeps its window when another
 /// policy *ahead of it in the source* is deleted, shifting its own `policy_N`
 /// source position — because retention keys on the stable id, not the position.
 ///
@@ -257,7 +257,7 @@ fn a_policy_keeps_its_window_when_an_earlier_policy_is_deleted() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **Multi-clause-per-policy retention by clause ordinal** (§2.3): a policy with
+/// **Multi-clause-per-policy retention by clause ordinal**: a policy with
 /// two temporal clauses keeps *both* windows across a rebuild, matched by the
 /// within-policy ordinal `m` in the composite key. A bug that keyed both leaves
 /// identically (ignoring `m`) or dropped one would surface here and nowhere else
@@ -315,7 +315,7 @@ fn a_policy_with_two_clauses_keeps_both_windows_across_a_rebuild() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **`DeleteAll` is terminal and fail-closed** (§2.1): it leaves an *empty set
+/// **`DeleteAll` is terminal and fail-closed**: it leaves an *empty set
 /// installed* — not the never-configured `NoPolicy` state — so `submit` still
 /// runs and denies, rather than erroring.
 #[test]
@@ -349,7 +349,7 @@ fn delete_all_leaves_an_empty_set_that_denies() {
 }
 
 /// **An `Add` slices a multi-policy source into independently-addressable
-/// entries** (§2.4): each policy gets its own id and its own `(id, index)`-keyed
+/// entries**: each policy gets its own id and its own `(id, index)`-keyed
 /// window, so a later `Reset` of one clears exactly that one.
 ///
 /// This is the corrected form of a bug that used to lurk here: a multi-policy
@@ -394,7 +394,7 @@ fn a_sliced_add_yields_independently_resettable_entries() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **`ResetAll` clears every window while keeping every policy** (§2.1/§2.2).
+/// **`ResetAll` clears every window while keeping every policy**.
 #[test]
 fn reset_all_clears_every_window() {
     let (mut engine, dir) = open("reset_all");
@@ -437,8 +437,8 @@ fn reset_all_clears_every_window() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **Checkpoint → incremental batch (retain one, reset another) → restart**
-/// (§2.6 + §2.3): recovery loads the snapshot's folded bundle and state, then
+/// **Checkpoint → incremental batch (retain one, reset another) → restart**:
+/// recovery loads the snapshot's folded bundle and state, then
 /// folds the post-snapshot verb records forward — carrying the unnamed policy's
 /// window across the *snapshot boundary* and starting the updated one fresh.
 ///
@@ -494,8 +494,8 @@ fn checkpoint_then_incremental_batch_then_restart() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **`DeleteAll`'s empty-but-installed set survives a restart still denying**
-/// (§2.1/§3): recovery must reproduce a deciding (deny) empty set, not the
+/// **`DeleteAll`'s empty-but-installed set survives a restart still denying**:
+/// recovery must reproduce a deciding (deny) empty set, not the
 /// never-configured `NoPolicy` error state.
 #[test]
 fn delete_all_survives_a_restart_still_denying() {
@@ -524,7 +524,7 @@ fn delete_all_survives_a_restart_still_denying() {
     let _ = std::fs::remove_file(&dir);
 }
 
-/// **A rejected batch mutates nothing** (§2.5): it writes zero durable records,
+/// **A rejected batch mutates nothing**: it writes zero durable records,
 /// and a `Reset` earlier in the same batch does not clear any live window —
 /// because a batch is applied by building a candidate and swapping only on full
 /// success, never by mutating live state in place.

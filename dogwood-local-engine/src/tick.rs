@@ -23,22 +23,6 @@
 //!   and running the timestamp domain ahead of the wall clock. At nanosecond
 //!   resolution real elapsed time dominates and the clamp effectively never
 //!   fires, so `within 1h` means an hour.
-//!
-//! Nanoseconds are the wider convention: `Dogwood_Temporal_Compiler`'s DSQL
-//! monitor stores `ts` in epoch nanos and clamps with
-//! `GREATEST((EXTRACT(EPOCH FROM NOW()) * 1000000000)::BIGINT, ts + 1)`, and its
-//! own differential scales the corpus's seconds up to nanos to compare against
-//! the interpreter. This type is the same conversion, placed where a Rust engine
-//! can apply it.
-//!
-//! # This is a migration seam, not permanent architecture
-//!
-//! The duplication exists because each backend converts for itself. If
-//! `dogwood_language` were to compare in nanoseconds — a single line, its
-//! interpreter's `delta <= within.seconds()` — then every backend could drop its
-//! conversion and this parameter could go away. Until then it is how a store
-//! chooses its own resolution without diverging from the oracle it is checked
-//! against.
 
 /// The resolution of the timestamps an engine will be fed: how many ticks make
 /// up one second.
@@ -58,8 +42,7 @@ impl TickRate {
     /// configuration.
     pub const SECONDS: TickRate = TickRate { per_second: 1 };
 
-    /// Timestamps in epoch nanoseconds — what a live store should assign, and
-    /// what the DSQL backend already stores.
+    /// Timestamps in epoch nanoseconds — what a live store should assign.
     pub const NANOS: TickRate = TickRate {
         per_second: 1_000_000_000,
     };
@@ -79,7 +62,7 @@ impl TickRate {
     /// Saturating in both senses, because both saturations are load-bearing:
     ///
     /// - `i64::MAX` seconds is the "effectively unbounded window" sentinel that
-    ///   disables pruning (`reach`), so it must survive conversion unchanged
+    ///   disables pruning, so it must survive conversion unchanged
     ///   rather than wrapping into some finite value that would start dropping
     ///   live events.
     /// - A large-but-finite window must clamp to `i64::MAX` rather than

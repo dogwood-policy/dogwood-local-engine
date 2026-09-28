@@ -1,7 +1,7 @@
 //! The timestamp source for the durable engine.
 //!
 //! [`DurableTemporalEngine`](crate::DurableTemporalEngine) assigns every record
-//! its timestamp at the append point (`DESIGN.md` §3.3) — never the caller — and
+//! its timestamp at the append point — never the caller — and
 //! it reads the current instant only through a [`Clock`]. In production that is
 //! the system clock ([`WallClock`]); a test supplies its own so it can place
 //! events at exact instants, or step the clock *backwards* to prove the engine's

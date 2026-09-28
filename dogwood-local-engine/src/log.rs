@@ -1,12 +1,9 @@
 //! The durable event log — a redb-backed, append-only, ordered store of opaque
-//! records (`DESIGN.md` §3, §6).
+//! records.
 //!
 //! # Payload-agnostic by design
 //!
-//! The frontend `Event` is not serializable and has no public text writer, and
-//! *what* to persist (the wire encoding of an event) is a server concern, not
-//! the engine's (`DESIGN.md` §2: engine = mechanism, server = wire/`Event`).
-//! So this log stores **opaque byte records** keyed by a monotonic `u64`
+//! This log stores **opaque byte records** keyed by a monotonic `u64`
 //! offset. A caller encodes its record to bytes, appends, and on recovery
 //! decodes each record back.
 //!
@@ -20,19 +17,19 @@
 //!
 //! - **Durable atomic append**: [`append`](DurableLog::append) commits the new
 //!   record in one redb write transaction with `Durability::Immediate` (fsync
-//!   before returning) — the transaction boundary of `DESIGN.md` §3.1.
+//!   before returning).
 //! - **Durable atomic *write set***: [`commit`](DurableLog::commit) puts several
 //!   writes in one such transaction, so facts that must not be seen apart never
 //!   are.
 //! - **Total order**: offsets are strictly increasing; the log defines the one
-//!   order of records (`DESIGN.md` §3.3).
+//!   order of records.
 //! - **Recovery**: [`scan_from`](DurableLog::scan_from) replays records in
 //!   offset order for rebuilding derived state.
 //! - **Prunable, in bounded steps**: [`prune_below`](DurableLog::prune_below)
-//!   reclaims a prefix (`DESIGN.md` §6.2/§6.4) without ever holding a long write
+//!   reclaims a prefix without ever holding a long write
 //!   transaction.
 //! - **Snapshot slot**: a reserved slot holds the latest snapshot pointer
-//!   (offset + opaque payload) so recovery can start mid-log (`DESIGN.md` §6.3).
+//!   (offset + opaque payload) so recovery can start mid-log.
 //!
 //! # Sharing
 //!
@@ -86,24 +83,34 @@ const RESERVED_KEYS: [&str; 3] = [SNAPSHOT_KEY, NEXT_OFFSET_KEY, BASE_OFFSET_KEY
 #[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum LogError {
+    /// Opening the database file failed.
     #[error("open durable log: {0}")]
     Open(#[source] redb::DatabaseError),
+    /// A database transaction failed.
     #[error("durable log transaction: {0}")]
     Txn(#[source] redb::TransactionError),
+    /// Opening a table inside a transaction failed.
     #[error("durable log table: {0}")]
     Table(#[source] redb::TableError),
+    /// Reading or writing the underlying storage failed.
     #[error("durable log storage: {0}")]
     Storage(#[source] redb::StorageError),
+    /// Committing a transaction failed.
     #[error("durable log commit: {0}")]
     Commit(#[source] redb::CommitError),
+    /// The stored snapshot record could not be decoded; the message says why.
     #[error("corrupt snapshot record: {0}")]
     CorruptSnapshot(String),
+    /// A caller tried to write a metadata key the log owns.
     #[error("metadata key `{0}` is reserved by the log")]
     ReservedMetaKey(String),
+    /// Setting a write transaction's durability level failed.
     #[error("durability: {0}")]
     Durability(String),
+    /// The writer lock was poisoned by a panic in another thread.
     #[error("durable log writer lock is poisoned")]
     WriterPoisoned,
+    /// `prune_below` was called with a limit of zero.
     #[error("prune limit must be greater than zero")]
     ZeroPruneLimit,
     #[cfg(feature = "fault-injection")]
@@ -113,7 +120,12 @@ pub enum LogError {
     /// reaching past the end of the log. Either would make recovery skip real
     /// records, so both are refused rather than stored.
     #[error("offset {offset} is beyond the end of the log ({next_offset})")]
-    OffsetBeyondEnd { offset: u64, next_offset: u64 },
+    OffsetBeyondEnd {
+        /// The offset that was claimed.
+        offset: u64,
+        /// The next offset the log would assign.
+        next_offset: u64,
+    },
 }
 
 #[cfg(feature = "shuttle")]
@@ -229,7 +241,12 @@ pub enum Write<'a> {
     /// Append a record, assigning it the next offset.
     Append(&'a [u8]),
     /// Store an opaque value under a caller-chosen metadata key.
-    Meta { key: &'a str, value: &'a [u8] },
+    Meta {
+        /// The metadata key.
+        key: &'a str,
+        /// The value stored under it.
+        value: &'a [u8],
+    },
     /// Replace the snapshot slot.
     Snapshot(&'a Snapshot),
 }
@@ -287,10 +304,7 @@ pub struct DurableLog {
 impl DurableLog {
     /// Open (creating if absent) the durable log at `path`.
     ///
-    /// Recovers both offsets from their slots. A store written before they were
-    /// persisted has neither, so they are derived once — `next_offset` from the
-    /// highest record, `base_offset` as 0 — and then written, so every later
-    /// open reads them rather than deriving.
+    /// Recovers both offsets from their slots.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, LogError> {
         Self::from_database(Database::create(path).map_err(LogError::Open)?)
     }
@@ -428,7 +442,7 @@ impl DurableLog {
 
     /// Durably append one record, returning its assigned offset. Commits with
     /// `Durability::Immediate` (fsync) so the record survives a crash before
-    /// this returns — the atomic transaction boundary (`DESIGN.md` §3.1).
+    /// this returns — the atomic transaction boundary.
     ///
     /// The single-write fast path; equivalent to a one-element
     /// [`commit`](Self::commit) without building a slice.
@@ -611,8 +625,7 @@ impl DurableLog {
     /// replay, never re-applied.
     ///
     /// The caller is responsible for pruning only records it can justify
-    /// dropping: either summarized by a durable snapshot, or provably dead (past
-    /// every installed leaf's lookback reach). The log cannot tell those apart,
+    /// dropping: summarized by a durable snapshot. The log cannot check that,
     /// so it enforces only that `below` is within the log.
     pub fn prune_below(&self, below: u64, max_records: usize) -> Result<Pruned, LogError> {
         if max_records == 0 {

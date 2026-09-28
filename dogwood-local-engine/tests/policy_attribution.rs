@@ -1,4 +1,3 @@
-//! Public durable-engine acceptance tests for POLICY_ATTRIBUTION_SPEC.md.
 //! Reasons are sets keyed by real management tokens; the unchanged language
 //! authorizer and lowered Cedar annotations supply the semantic reference.
 

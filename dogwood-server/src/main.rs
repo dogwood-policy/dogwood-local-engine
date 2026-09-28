@@ -1,14 +1,13 @@
 //! `dogwood-server` — the Dogwood policy server and its control-plane CLI.
 //!
-//! One binary, two tiers of subcommand, split exactly as `DESIGN.md` §8
-//! specifies:
+//! One binary, two tiers of subcommand:
 //!
 //! - `dogwood-server run` — the server itself. Owns the policy set, the compiled
 //!   temporal monitor, and the durable event log as its own OS principal, and
-//!   serves the schema-driven `submit` wire API (§10) over a Unix socket.
+//!   serves the schema-driven `submit` wire API over a Unix socket.
 //! - `dogwood-server policy install|show`, `status`, `checkpoint` — the
 //!   **control plane**: a client over the privileged socket. Authorized by
-//!   kernel peer-credential against a uid allowlist (§8.1), and never reachable
+//!   kernel peer-credential against a uid allowlist, and never reachable
 //!   over the agent's data path.
 //! - `dogwood-server submit` / `ping` — data-path clients, for driving a running
 //!   server by hand.
@@ -22,7 +21,7 @@
 //! does **not** give tamper-resistance: a process that links it can rewrite the
 //! policy set it is being judged by. This binary is where that changes, by moving
 //! the policy set behind a process boundary the monitored agent is not on the
-//! inside of (§7). The prerequisite §7.1 states plainly: **run the server as one
+//! inside of. The prerequisite is plain: **run the server as one
 //! uid and the monitored agent as a different, lower-privileged uid.** Same uid,
 //! no boundary.
 
@@ -68,12 +67,12 @@ struct Cli {
 enum Command {
     /// Run the server.
     Run {
-        /// Snapshot the monitor state every N events (`DESIGN.md` §6.3). `0`
+        /// Snapshot the monitor state every N events. `0`
         /// disables periodic snapshots; a clean shutdown still snapshots.
         #[arg(long, default_value_t = 10_000)]
         snapshot_interval: u64,
         /// Additional uids permitted on the control plane, beyond the server's
-        /// own uid (§8.1). Widening this widens who may author policy.
+        /// own uid. Widening this widens who may author policy.
         #[arg(long, value_delimiter = ',')]
         control_uid: Vec<u32>,
     },
@@ -118,11 +117,11 @@ enum PolicyCommand {
     /// Install a policy set, replacing what is running — the declarative path.
     ///
     /// The server validates the bundle against the schema before accepting it and
-    /// swaps atomically; a rejected install leaves the running set serving (§8).
+    /// swaps atomically; a rejected install leaves the running set serving.
     /// This is also where the event schema is configured, once: it is fixed
-    /// thereafter, and a later install that changes it is rejected
-    /// (`POLICY_INSTALL_SEMANTICS.md` §2.7). Every policy is reborn
-    /// (`[DeleteAll; Add …]`, §2.8); use the incremental verbs below to keep
+    /// thereafter, and a later install that changes it is rejected.
+    /// Every policy is reborn
+    /// (`[DeleteAll; Add …]`); use the incremental verbs below to keep
     /// existing history.
     Install {
         /// The `.dw` policy file.
@@ -134,13 +133,13 @@ enum PolicyCommand {
         #[arg(long)]
         event_schema: Option<PathBuf>,
     },
-    /// Add one policy, born fresh; prints the id the engine mints for it (§2.5).
+    /// Add one policy, born fresh; prints the id the engine mints for it.
     Add {
         /// The `.dw` file — a single policy.
         policy: PathBuf,
     },
     /// Replace one policy's content by id. Same id, but its history resets
-    /// ("update means reset", §2.2).
+    /// ("update means reset").
     Update {
         /// The policy handle (from `policy list`).
         id: String,
@@ -152,23 +151,23 @@ enum PolicyCommand {
         /// The policy handle (from `policy list`).
         id: String,
     },
-    /// Clear one policy's accumulated history; its content is unchanged (§2.2).
+    /// Clear one policy's accumulated history; its content is unchanged.
     Reset {
         /// The policy handle (from `policy list`).
         id: String,
     },
     /// Remove every policy. The schema is kept and the empty set stays installed,
-    /// so decisions fail closed (§2.1).
+    /// so decisions fail closed.
     DeleteAll,
-    /// Clear every policy's history; all policies are kept (§2.1).
+    /// Clear every policy's history; all policies are kept.
     ResetAll,
-    /// Revalidate + re-lower the whole set under a new action schema (§2.7). All
+    /// Revalidate + re-lower the whole set under a new action schema. All
     /// history carries if it validates; the batch is rejected if it does not.
     SetActionSchema {
         /// The Cedar action schema (`.cedarschema`).
         action_schema: PathBuf,
     },
-    /// Append a fragment onto the current action schema, atomically (§2.7) — add a
+    /// Append a fragment onto the current action schema, atomically — add a
     /// new entity/action without a fetch-then-set round trip a concurrent change
     /// could invalidate. All history carries if the merged schema validates; the
     /// batch is rejected (nothing changes) if it does not.
@@ -176,7 +175,7 @@ enum PolicyCommand {
         /// A Cedar schema fragment (`.cedarschema`) with the new declarations.
         fragment: PathBuf,
     },
-    /// List the installed policies (id + created/updated), paginated (§2.7).
+    /// List the installed policies (id + created/updated), paginated.
     List {
         /// Cap the page size; omit to return all.
         #[arg(long)]
@@ -191,7 +190,7 @@ enum PolicyCommand {
         id: String,
     },
     /// Print the store's schemas: the original action schema and the configured
-    /// event schema (§2.7).
+    /// event schema.
     Schema,
     /// Print the whole installed policy source (every policy, concatenated).
     Show,
@@ -239,9 +238,8 @@ fn run(cli: &Cli, paths: &Paths) -> Result<(), String> {
                     paths.control_socket().display()
                 );
                 eprintln!("  control uids: {:?}", allowlist.uids());
-                // §7.1's prerequisite is the one deployment fact that determines
+                // The uid prerequisite is the one deployment fact that determines
                 // whether the boundary is real, so it is stated at every start
-                // rather than left in the design doc.
                 eprintln!(
                     "\nnote: tamper-resistance requires the monitored agent to run as a \
                      DIFFERENT,\n      lower-privileged uid than this server. Same uid, no \
@@ -476,7 +474,7 @@ fn report_control(cli: &Cli, response: &ControlResponse) -> Result<(), String> {
             if *leaf_count > 0 {
                 println!("  {leaves_retained} kept their accumulated history");
                 if *leaves_prospective > 0 {
-                    // §9.2's warm-up consequence is the surprising half of
+                    // The warm-up consequence is the surprising half of
                     // prospective installs, so it is stated at the moment it
                     // becomes true rather than left for the operator to recall.
                     println!(

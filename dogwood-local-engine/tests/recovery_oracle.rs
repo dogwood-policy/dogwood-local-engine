@@ -264,7 +264,7 @@ fn a_stale_snapshot_cannot_hand_one_formula_anothers_history() {
 
 #[test]
 fn history_carries_across_a_change_that_keeps_every_window() {
-    // The other half of §9.1: an edit that leaves the temporal clause untouched
+    // The complementary case: an edit that leaves the temporal clause untouched
     // must preserve the accumulated window, so the reference is fed everything.
     let (frozen, promises) = crash_after("kept", |rec| {
         rec.install(WATCHING_READ, ACTION_SCHEMA).expect("applies");

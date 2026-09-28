@@ -1,10 +1,10 @@
 //! The wire protocol: request/response types and their framing.
 //!
-//! Two sockets carry two disjoint verb sets (`DESIGN.md` §8.1), and the type
+//! Two sockets carry two disjoint verb sets, and the type
 //! system enforces the split — the data socket deserializes [`DataRequest`],
 //! which has **no variant that mutates policy**, so no amount of confusion on
 //! the data path can reach a control verb. That is the wire-level expression of
-//! §7's "the agent gets exactly two verbs and no verb to read, replace, or
+//! "the agent gets exactly two verbs and no verb to read, replace, or
 //! disable a policy."
 //!
 //! # Framing
@@ -22,7 +22,7 @@
 //! The wire is a **local** IPC boundary whose cost is dominated by the fsync in
 //! the append path, so a compact binary encoding would buy nothing measurable
 //! while costing the thing that matters here: any language can speak this
-//! protocol with no generated bindings, which is the whole reason §2 chose a
+//! protocol with no generated bindings, which is the whole reason to choose a
 //! server over a library-only deliverable.
 
 use std::io::{Read, Write};
@@ -36,8 +36,7 @@ pub const MAX_FRAME: u32 = 16 * 1024 * 1024;
 
 // ─── The event wire form ─────────────────────────────────────────────
 
-/// An event as it crosses the wire — **schema-neutral by construction**
-/// (`DESIGN.md` §3.4).
+/// An event as it crosses the wire — **schema-neutral by construction**.
 ///
 /// Nothing here privileges any event kind, field group, or field name: `kind` is
 /// an arbitrary string the *installed schema* interprets (it decides which kinds
@@ -46,7 +45,7 @@ pub const MAX_FRAME: u32 = 16 * 1024 * 1024;
 /// `input`/`output` are values a client happens to send, not cases in this type.
 ///
 /// Note what is **absent**: a timestamp. The store assigns it at append
-/// (`DESIGN.md` §3.3) — the append point is simultaneously the sequencer and the
+/// — the append point is simultaneously the sequencer and the
 /// clock, so a client cannot backdate an event to slip outside a window or
 /// reorder itself ahead of another caller. Omitting the field from the wire
 /// makes that unforgeable rather than merely unenforced.
@@ -113,7 +112,7 @@ impl WireEvent {
 ///
 /// There is deliberately no `GetPolicies`, `SetPolicy`, or `Shutdown` variant:
 /// the agent can report events and ask for decisions, and cannot read, replace,
-/// or disable the rules that govern it (`DESIGN.md` §7).
+/// or disable the rules that govern it.
 ///
 /// `Submit` is much larger than `Ping`, so the enum is `Submit`-sized. Boxing the
 /// event to even them out would trade a stack copy for a heap allocation on the
@@ -124,7 +123,7 @@ impl WireEvent {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum DataRequest {
-    /// The one schema-driven primitive (`DESIGN.md` §10). The installed
+    /// The one schema-driven primitive. The installed
     /// schema's `decision_kinds()` and the event's own kind decide the
     /// behaviour — there are not two hardcoded verbs:
     ///
@@ -147,7 +146,7 @@ pub enum DataResponse {
         ///
         /// The verdict is only meaningful relative to a moment, and this is that
         /// moment: every window the rules declare is measured against it. The
-        /// caller cannot derive it — the store assigns it (`DESIGN.md` §3.3) and
+        /// caller cannot derive it — the store assigns it and
         /// the wire event carries no timestamp — so returning it is the only way a
         /// client can reason about when its own history ages out.
         ///
@@ -170,7 +169,7 @@ pub enum DataResponse {
     },
     /// A history-kind event was durably recorded; no verdict applies.
     ///
-    /// Deliberately empty. `DESIGN.md` §10 asks that history events not be
+    /// Deliberately empty. History events must not be
     /// fire-and-forget, and this variant's *arrival* is what satisfies that: the
     /// event is on disk before it is sent. The log offset used to travel here and
     /// no longer does — a client cannot act on the value (one that lost the
@@ -201,13 +200,13 @@ pub enum DataResponse {
 
 // ─── The control plane (privileged socket only) ──────────────────────
 
-/// One policy-management verb on the wire (`POLICY_INSTALL_SEMANTICS.md` §2.1),
+/// One policy-management verb on the wire,
 /// the transport form of `dogwood_local_engine::Verb`.
 ///
 /// `Add` carries no id — the engine mints one and returns it in
 /// [`ControlResponse::Batched`]. There is no event-schema verb: the event
 /// schema and macro library are store configuration, fixed at first `Apply` and
-/// immutable through the verbs (§2.7).
+/// immutable through the verbs.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "verb", rename_all = "snake_case")]
 pub enum WireVerb {
@@ -224,16 +223,16 @@ pub enum WireVerb {
     DeleteAll,
     /// Clear every policy's history; all policies kept.
     ResetAll,
-    /// Revalidate + re-lower the whole set under a new action schema (§2.7).
+    /// Revalidate + re-lower the whole set under a new action schema.
     SetActionSchema { action_schema: String },
-    /// Append a fragment onto the current action schema, atomically (§2.7) — so a
+    /// Append a fragment onto the current action schema, atomically — so a
     /// caller can add a new entity/action without a fetch-then-set round trip a
     /// concurrent change could invalidate.
     AppendActionSchema { fragment: String },
 }
 
 /// A policy's metadata, without its source — what [`ControlRequest::List`]
-/// returns (§2.1: `list -> [PolicySummary]`). The full statement is fetched per
+/// returns. The full statement is fetched per
 /// id with [`ControlRequest::GetPolicyById`].
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PolicySummary {
@@ -246,14 +245,14 @@ pub struct PolicySummary {
 }
 
 /// A request on the **control** socket — the privileged authoring path, gated
-/// by peer-credential uid allowlist (`DESIGN.md` §8.1).
+/// by peer-credential uid allowlist.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum ControlRequest {
     /// Install a complete policy set + schema, replacing whatever is installed
-    /// — the declarative path (`[DeleteAll; Add …]`, `POLICY_INSTALL_SEMANTICS.md`
-    /// §2.8). Also the store-configuration entry point: it sets the event schema
-    /// (fixed thereafter, §2.7). Maps to the engine's `install`.
+    /// — the declarative path (`[DeleteAll; Add …]`).
+    /// Also the store-configuration entry point: it sets the event schema
+    /// (fixed thereafter). Maps to the engine's `install`.
     ///
     /// The server **validates before accepting** and swaps atomically; a
     /// rejected install leaves the running set untouched.
@@ -266,12 +265,12 @@ pub enum ControlRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         event_schema: Option<String>,
     },
-    /// Apply a batch of policy verbs atomically over the current set (§2.1) —
+    /// Apply a batch of policy verbs atomically over the current set —
     /// the incremental authoring path. All verbs take effect together or the
     /// whole batch is rejected and the running set is untouched.
     Batch { verbs: Vec<WireVerb> },
-    /// List the installed policies' metadata, most-stable-id first, paginated
-    /// (§2.7). `max_results` caps the page (all when absent); `next_token` is the
+    /// List the installed policies' metadata, most-stable-id first, paginated.
+    /// `max_results` caps the page (all when absent); `next_token` is the
     /// handle to resume after (the last id of the previous page), echoed back in
     /// [`ControlResponse::PolicyList`] when more remain.
     List {
@@ -287,13 +286,13 @@ pub enum ControlRequest {
     /// Show the whole installed policy source verbatim (every policy's canonical
     /// statement, concatenated).
     GetPolicy,
-    /// Show one policy's canonical statement by id (§2.1: `GetPolicy(id)`).
+    /// Show one policy's canonical statement by id.
     GetPolicyById { id: String },
-    /// Return the store's schemas (§2.1: `GetSchema`) — the **original** action
+    /// Return the store's schemas — the **original** action
     /// schema the operator authored (not the augmented one) and the configured
     /// event schema (`None` = the built-in default).
     GetSchema,
-    /// Force a state snapshot now (`DESIGN.md` §6.3's manual trigger).
+    /// Force a state snapshot now.
     Checkpoint,
 }
 
@@ -302,7 +301,7 @@ pub enum ControlRequest {
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ControlResponse {
     /// An `Apply` succeeded, reporting the prospective-install consequences
-    /// (`DESIGN.md` §9.2) so the operator sees which rules start cold.
+    /// so the operator sees which rules start cold.
     Applied {
         /// When the change took effect, in epoch **nanoseconds** — the moment the
         /// change record was assigned, on the same clock and the same sequence as
@@ -320,7 +319,7 @@ pub enum ControlResponse {
         /// Leaves that kept their accumulated window (unchanged formulas).
         leaves_retained: usize,
         /// Leaves starting empty — new or edited formulas, subject to the
-        /// warm-up window of §9.2.
+        /// warm-up window.
         leaves_prospective: usize,
     },
     /// `Status` reply.
@@ -332,7 +331,7 @@ pub enum ControlResponse {
         /// The event kinds the installed schema treats as decision points.
         decision_kinds: Vec<String>,
         /// The schema's partition key: the dotted field paths the event stream may
-        /// be sharded on (`DESIGN.md` §3.3). **Empty means unshardable** — the
+        /// be sharded on. **Empty means unshardable** — the
         /// schema declares no universal symmetric pin, so partitioning would
         /// change verdicts and the server runs a single instance.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -343,7 +342,7 @@ pub enum ControlResponse {
         control_uids: Vec<u32>,
     },
     /// A `Batch` succeeded. `minted` is the ids assigned to the batch's `Add`
-    /// verbs, in listed order (§2.5), so a caller can address what it created.
+    /// verbs, in listed order, so a caller can address what it created.
     Batched {
         /// Engine-minted opaque handles for the batch's `Add` verbs, in order.
         minted: Vec<String>,
@@ -352,7 +351,7 @@ pub enum ControlResponse {
         applied_at_nanos: i64,
     },
     /// A `List` reply: a page of policy metadata and, when more remain, the id
-    /// to resume after in a follow-up `List` (§2.7).
+    /// to resume after in a follow-up `List`.
     PolicyList {
         policies: Vec<PolicySummary>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

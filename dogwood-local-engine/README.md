@@ -42,6 +42,9 @@ hour.
 ### The policy
 
 ```text
+@id("allow_login")
+permit (principal, action == Drupe::Action::"Login", resource);
+
 @id("read_after_login")
 permit (
     principal,
@@ -92,15 +95,14 @@ history and get no verdict. Here is one session of four events, with the
 verdict the engine returns for each request:
 
 ```text
-@0     Login::request   { user: "alice" }   -> DENY    // no policy permits Login
+@0     Login::request   { user: "alice" }   -> ALLOW   // allow_login
 @5     Login::response  { user: "alice" }
 @10    Read::request    { user: "alice" }   -> ALLOW   // logged in 5s ago
 @7200  Read::request    { user: "alice" }   -> DENY    // login is 2h old
 ```
 
-At `@0` alice logs in. The only policy is scoped to `Read`, so nothing permits
-the `Login` request and it is denied; the request is still recorded. At `@5`
-the login returns and the engine records the response. At `@10` alice reads.
+At `@0` alice logs in; `allow_login` permits the request. At `@5` the login
+returns and the engine records the response. At `@10` alice reads.
 A `Login` response for the same user is five seconds behind the request, well
 inside the hour, so the read is allowed. At `@7200` alice reads again. The only
 login is two hours old, the window has passed, and the read is denied.
@@ -115,6 +117,9 @@ use dogwood_language::{Event, EventBuilder, Value};
 use dogwood_local_engine::{DurableError, DurableTemporalEngine, Outcome};
 
 const POLICY: &str = r#"
+@id("allow_login")
+permit (principal, action == Drupe::Action::"Login", resource);
+
 @id("read_after_login")
 permit (principal, action == Drupe::Action::"Read", resource)
 when temporal {

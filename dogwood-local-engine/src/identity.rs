@@ -289,6 +289,14 @@ fn render_term(term: &Term, out: &mut String) {
             }
         }
         Term::Agg(agg) => render_agg(agg, out),
+        Term::Arith { op, left, right } => {
+            out.push_str("arith ");
+            put_str(op.token(), out);
+            out.push(' ');
+            render_term(left, out);
+            out.push(' ');
+            render_term(right, out);
+        }
         Term::ParamRef(p) => {
             out.push_str("param ");
             put_str(p, out);

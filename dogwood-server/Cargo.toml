@@ -6,6 +6,14 @@ edition = "2024"
 # its control-plane subcommands), not a library artifact other packages consume.
 publish = false
 description = "A demo service that puts dogwood-local-engine behind Unix sockets with a separate control plane. Not for production use."
+# PLATFORM: Linux-only. It compiles on any Unix (it uses Unix domain sockets),
+# but its control-plane trust boundary attests the peer via SO_PEERCRED, which
+# is implemented only for Linux -- on macOS peer attestation fails closed, so
+# the server is non-functional there, and on Windows std::os::unix does not even
+# exist so it does not compile. CI builds/tests the full workspace only on Linux
+# and excludes this crate (and dogwood-performance, which depends on it) on
+# macOS and Windows. Supporting it off Linux would need macOS
+# getpeereid/LOCAL_PEERCRED attestation and a Windows named-pipe transport.
 exclude = ["/build", "/Config", "/build-tools/"]
 
 # A library plus a thin binary over it. The library is what the integration
@@ -25,7 +33,7 @@ path = "src/main.rs"
 dogwood-local-engine = { path = "../dogwood-local-engine" }
 # The frontend, for the policy/schema types the control plane installs and the
 # event types the wire API exchanges.
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0" }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "4ec5e2c01b44ff3882a231ae5d315b330b38fa25", version = "1.0" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

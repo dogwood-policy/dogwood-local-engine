@@ -616,6 +616,61 @@ when temporal {
     three_lane(policy, &ev);
 }
 
+/// The memo when the aggregates sit inside arithmetic: the guard compares
+/// `(count Transfers by user) - (count Logouts by user)` against a
+/// constant, so the memo machinery has to reach both counts through the
+/// arithmetic node. Three ways that could break, one assertion each:
+///   1. Wrong answers. A memo key that ignores the outer-bound user `u`
+///      serves one user's count to another (u9's concern, through the
+///      extra layer); three_lane catches it.
+///   2. One side left unmemoized. Invisible to a total `hits > 0`: the
+///      stats are per-monitor, and the Transfer side alone keeps the tally
+///      positive. So the second assertion differences against the same
+///      policy minus the subtraction — dropping a memoized count must
+///      drop hits. (An agg skipped by indexing ENTIRELY is case 1, not
+///      this: its memo_id stays 0 and aliases the first agg's slot.)
+///   3. Hang. The memo lock must be released before the recompute, which
+///      may re-enter the memo (see u10); held across it, the test never ends.
+///
+/// The counts sit under the outer `formerly` so lookups recur across
+/// decisions and the memo gets hits at all (see AGG_UNDER_SWEEP).
+///
+/// EXPERIMENTAL-ARITHMETIC: the frontend accepts this policy only with its
+/// `experimental-arithmetic` feature on, so this test runs only when this
+/// crate's feature of the same name is on.
+#[test]
+#[cfg(feature = "experimental-arithmetic")]
+fn arith_compound_over_aggs_memoizes() {
+    let policy = r#"permit (principal, action == Test::Action::"Read", resource)
+when temporal {
+    exists (u: String). (formerly within 24h (Test::Action::"Login"::response{ input.user: u, output.result: true }
+        && (count for (t: Timepoint). where (formerly within 1h (Test::Action::"Transfer"::response{ input.user: u, output.result: true } && tp(t))))
+         - (count for (t2: Timepoint). where (formerly within 1h (Test::Action::"Logout"::response{ input.user: u, output.result: true } && tp(t2)))) >= 2))
+};"#;
+    // The same policy with the Logout count (and the subtraction) removed.
+    // Everything else — the outer exists/formerly, the Login correlation,
+    // the Transfer count, the `>= 2` — is identical, so the difference in
+    // hits is attributable to the second count alone.
+    let one_count = r#"permit (principal, action == Test::Action::"Read", resource)
+when temporal {
+    exists (u: String). (formerly within 24h (Test::Action::"Login"::response{ input.user: u, output.result: true }
+        && (count for (t: Timepoint). where (formerly within 1h (Test::Action::"Transfer"::response{ input.user: u, output.result: true } && tp(t)))) >= 2))
+};"#;
+
+    let (hits, misses) = three_lane(policy, &sweep_trace()).agg_memo_stats();
+    let (one_hits, _) = three_lane(one_count, &sweep_trace()).agg_memo_stats();
+
+    assert!(
+        hits > 0,
+        "no memo hits for aggregates under arithmetic (stats {hits}/{misses})"
+    );
+    assert!(
+        hits > one_hits,
+        "only one side of the arithmetic is memoized: two counts gave {hits} hits, \
+         one count gave {one_hits} — the Logout-side count contributed nothing"
+    );
+}
+
 /// U11: the kill switch itself doesn't fork behavior — the OFF lane is
 /// byte-for-byte today's path (already exercised by every three_lane
 /// call); here we additionally pin that OFF really disables (0 stats).

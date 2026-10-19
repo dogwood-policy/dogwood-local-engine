@@ -67,9 +67,13 @@ fn wide_count_aggregate_agrees_with_construction() {
     }
     let got = lines.join("\n");
 
+    // Compare on content, not line endings: EXPECTED is a checked-in fixture and
+    // Git may deliver it with CRLF on Windows, whereas `got` is joined with '\n'.
+    // Normalize both so the assertion is about the verdict stream, not the eol.
+    let normalize = |s: &str| s.replace("\r\n", "\n");
     assert_eq!(
-        got.trim_end(),
-        EXPECTED.trim_end(),
+        normalize(got.trim_end()),
+        normalize(EXPECTED.trim_end()),
         "local engine must reproduce the by-construction verdict for the wide count case"
     );
 

@@ -19,12 +19,18 @@ concurrency:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     # Full debug info fills the runner's disk before the doctests link.
     env:
       CARGO_INCREMENTAL: 0
       CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      # dogwood-server and dogwood-performance are Unix-socket, Linux-first crates.
+      SCOPE: ${{ matrix.os == 'ubuntu-latest' && '--workspace' || '-p dogwood-local-engine' }}
     steps:
       # Use first-party actions; install the Rust toolchain through rustup.
       # persist-credentials: false — token isn't used after checkout.
@@ -51,11 +57,33 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
 
       - name: Build
-        run: cargo build --workspace --all-targets
+        # Force bash on all platforms (Windows defaults run: to pwsh, where
+        # `$SCOPE` would not expand as a shell variable). Git Bash ships on the
+        # Windows runner, so `$SCOPE` resolves identically everywhere.
+        shell: bash
+        run: cargo build $SCOPE --all-targets
 
       - name: Test
-        run: cargo test --workspace
+        shell: bash
+        run: cargo test $SCOPE
 
-      - name: Disk usage
-        if: always()
+      - name: Disk usage (Unix)
+        # df/du are Unix-only; the Windows equivalent is a separate step below.
+        if: always() && runner.os != 'Windows'
         run: df -h / && du -sh target
+
+      - name: Disk usage (Windows)
+        # PowerShell equivalent of `df -h /` (drive free/used) and `du -sh target`
+        # (recursive size of the build dir). `target` may not exist if the build
+        # step failed early, so guard it.
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, Used, Free
+          if (Test-Path target) {
+            $bytes = (Get-ChildItem target -Recurse -File -ErrorAction SilentlyContinue |
+              Measure-Object -Property Length -Sum).Sum
+            "target: {0:N2} GB" -f ($bytes / 1GB)
+          } else {
+            "target: (absent)"
+          }

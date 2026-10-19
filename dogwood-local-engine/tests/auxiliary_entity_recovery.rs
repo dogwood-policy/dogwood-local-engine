@@ -6,6 +6,17 @@
 //! image must still produce the verdict it produced before persistence. That
 //! contract matters to any replay/audit consumer and prevents recovery from
 //! silently changing the semantic meaning of an accepted event.
+//!
+//! Unix-only. Both tests "freeze a crash image" by copying the engine's
+//! durable-log file (a redb database) while the engine is still open, then
+//! recover from the copy. redb memory-maps its file and holds it with exclusive
+//! access on Windows, so copying a live, still-open store there fails with
+//! ERROR_LOCK_VIOLATION (OS error 33). Copying an open mmap'd file is a
+//! Unix-specific capability; the crash-recovery logic itself is still exercised
+//! on Windows through the clean-reopen path (DurableTemporalEngine::open) and the
+//! rest of the recovery suite. The whole file compiles to nothing on Windows so
+//! its helpers do not warn as unused there.
+#![cfg(unix)]
 
 use dogwood_language::{
     Authorizer, Decision, Event, EventBuilder, LoweredPolicySet, PolicySchema, ServiceSchema, Value,

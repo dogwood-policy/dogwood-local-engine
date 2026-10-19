@@ -40,7 +40,7 @@
 use std::collections::BTreeMap;
 
 use dogwood_language::temporal_ast::{
-    AggExprKind, CmpOp, Condition, ConditionKind, Predicate, Term, TypedBinder, WithinSpec,
+    AggExprKind, ArithOp, CmpOp, Condition, ConditionKind, Predicate, Term, TypedBinder, WithinSpec,
 };
 use dogwood_language::{Event, Value};
 
@@ -483,8 +483,8 @@ enum Node {
     },
 }
 
-/// A comparison operand: a plain term, or an aggregate reducing a body node's
-/// relation at the current timepoint.
+/// A comparison operand: a plain term, an aggregate reducing a body node's
+/// relation at the current timepoint, or an arithmetic tree over operands.
 #[derive(Clone)]
 enum Operand {
     Term(Term),
@@ -495,6 +495,16 @@ enum Operand {
         body: Box<Node>,
         /// Index into the Monitor's `AggMemo` tables, assigned at build.
         memo_id: u32,
+    },
+    /// `left <op> right`, Long-valued (validation's sort check). Aggregates
+    /// inside arithmetic stay `Operand::Agg` leaves so they keep the memo,
+    /// history recording, and snapshot walk. Every walk over `Operand`
+    /// recurses left then right; that fixed pre-order is what keeps memo-id
+    /// assignment and snapshot state aligned with each other.
+    Arith {
+        op: ArithOp,
+        left: Box<Operand>,
+        right: Box<Operand>,
     },
 }
 
@@ -509,21 +519,37 @@ impl Operand {
         match self {
             Operand::Term(_) => 0,
             Operand::Agg { body, .. } => body.max_window(),
+            Operand::Arith { left, right, .. } => left.max_window().max(right.max_window()),
         }
     }
     fn record(&mut self, event: &Event) {
-        if let Operand::Agg { body, .. } = self {
-            body.record(event);
+        match self {
+            Operand::Term(_) => {}
+            Operand::Agg { body, .. } => body.record(event),
+            Operand::Arith { left, right, .. } => {
+                left.record(event);
+                right.record(event);
+            }
         }
     }
     fn drop_front(&mut self, n: usize) {
-        if let Operand::Agg { body, .. } = self {
-            body.drop_front(n);
+        match self {
+            Operand::Term(_) => {}
+            Operand::Agg { body, .. } => body.drop_front(n),
+            Operand::Arith { left, right, .. } => {
+                left.drop_front(n);
+                right.drop_front(n);
+            }
         }
     }
     fn save_state(&self, out: &mut Vec<u8>, visit: &mut dyn FnMut(&mut Vec<u8>, &LeafStore)) {
-        if let Operand::Agg { body, .. } = self {
-            body.save_state(out, visit);
+        match self {
+            Operand::Term(_) => {}
+            Operand::Agg { body, .. } => body.save_state(out, visit),
+            Operand::Arith { left, right, .. } => {
+                left.save_state(out, visit);
+                right.save_state(out, visit);
+            }
         }
     }
     fn load_state(
@@ -531,13 +557,19 @@ impl Operand {
         r: &mut crate::snapshot::Reader,
         next: &mut dyn FnMut(&mut crate::snapshot::Reader) -> LeafStore,
     ) {
-        if let Operand::Agg { body, .. } = self {
-            body.load_state(r, next);
+        match self {
+            Operand::Term(_) => {}
+            Operand::Agg { body, .. } => body.load_state(r, next),
+            Operand::Arith { left, right, .. } => {
+                left.load_state(r, next);
+                right.load_state(r, next);
+            }
         }
     }
 
     /// If this operand is a plain unbound variable (a range-binder candidate),
-    /// its name; else `None`. An aggregate is never a binder.
+    /// its name; else `None`. Aggregates and compound arithmetic operands are
+    /// never binders.
     fn unbound_var<'a>(&'a self, env: &Env) -> Option<&'a str> {
         match self {
             Operand::Term(Term::Var(n)) if env.get(n).is_none() => Some(n),
@@ -603,6 +635,18 @@ impl Operand {
                     AggKind::Sum => {
                         project_sum(&rows, for_vars, bound_var.as_deref().unwrap_or(""))
                     }
+                }))
+            }
+            // Saturating i64 per operation in tree order (guide 08 §5.4).
+            // A side that does not resolve to an integer makes the whole
+            // operand unresolved, so the enclosing comparison is false.
+            Operand::Arith { op, left, right } => {
+                let l = left.value(k, env, tl, memo)?.as_int()?;
+                let r = right.value(k, env, tl, memo)?.as_int()?;
+                Some(Value::Int(match op {
+                    ArithOp::Add => l.saturating_add(r),
+                    ArithOp::Sub => l.saturating_sub(r),
+                    ArithOp::Mul => l.saturating_mul(r),
                 }))
             }
         }
@@ -1066,6 +1110,12 @@ fn index_agg_memos(node: &mut Node, memo: &mut AggMemo) {
 }
 
 fn index_agg_operand(op: &mut Operand, memo: &mut AggMemo) {
+    // Same left-then-right pre-order as the save/load walk.
+    if let Operand::Arith { left, right, .. } = op {
+        index_agg_operand(left, memo);
+        index_agg_operand(right, memo);
+        return;
+    }
     if let Operand::Agg {
         for_vars,
         bound_var,
@@ -1108,6 +1158,7 @@ fn body_has_opaque_terms(node: &Node) -> bool {
         match t {
             Term::ParamRef(_) | Term::BinderRef(_) | Term::Agg(_) => true,
             Term::Array(items) => items.iter().any(term_opaque),
+            Term::Arith { left, right, .. } => term_opaque(left) || term_opaque(right),
             _ => false,
         }
     }
@@ -1115,6 +1166,7 @@ fn body_has_opaque_terms(node: &Node) -> bool {
         match o {
             Operand::Term(t) => term_opaque(t),
             Operand::Agg { body, .. } => body_has_opaque_terms(body),
+            Operand::Arith { left, right, .. } => operand_opaque(left) || operand_opaque(right),
         }
     }
     match node {
@@ -1180,6 +1232,10 @@ fn operand_env_keys(op: &Operand, out: &mut std::collections::BTreeSet<String>) 
             }
             out.extend(inner);
         }
+        Operand::Arith { left, right, .. } => {
+            operand_env_keys(left, out);
+            operand_env_keys(right, out);
+        }
     }
 }
 
@@ -1198,6 +1254,10 @@ fn term_env_keys(t: &Term, out: &mut std::collections::BTreeSet<String>) {
             for it in items {
                 term_env_keys(it, out);
             }
+        }
+        Term::Arith { left, right, .. } => {
+            term_env_keys(left, out);
+            term_env_keys(right, out);
         }
         _ => {}
     }
@@ -1261,7 +1321,11 @@ fn resolve_term(env: &Env, term: &Term) -> Option<Value> {
         Term::Var(name) => env.get(name).cloned(),
         Term::ContextField(path) => env.get(&context_key(path)).cloned(),
         Term::ScopeField(path) => env.get(&scope_key(path)).cloned(),
-        Term::Wildcard | Term::Agg(_) | Term::ParamRef(_) | Term::BinderRef(_) => None,
+        Term::Wildcard
+        | Term::Agg(_)
+        | Term::ParamRef(_)
+        | Term::BinderRef(_)
+        | Term::Arith { .. } => None,
     }
 }
 
@@ -1285,8 +1349,14 @@ fn req_key(term: &Term) -> Option<String> {
     }
 }
 
-/// Record a decision term (if a `context.*` / scope read) so `verdict` seeds it.
+/// Record a decision term (if a `context.*` / scope read) so `verdict` seeds
+/// it, recursing into arithmetic so a compound's atoms are seeded too.
 fn record_req_term(term: &Term, req: &mut BTreeMap<String, Term>) {
+    if let Term::Arith { left, right, .. } = term {
+        record_req_term(left, req);
+        record_req_term(right, req);
+        return;
+    }
     if let Some(key) = req_key(term) {
         req.entry(key).or_insert_with(|| term.clone());
     }
@@ -1390,7 +1460,8 @@ fn build_compare(
 }
 
 /// Build a comparison operand from a term: an aggregate → [`Operand::Agg`]
-/// (recursively building its body), else [`Operand::Term`].
+/// (recursively building its body), arithmetic → [`Operand::Arith`]
+/// (recursively building each side), else [`Operand::Term`].
 fn build_operand(term: &Term, req: &mut BTreeMap<String, Term>, rate: TickRate) -> Option<Operand> {
     match term {
         Term::Agg(agg) => {
@@ -1418,6 +1489,11 @@ fn build_operand(term: &Term, req: &mut BTreeMap<String, Term>, rate: TickRate) 
                 memo_id: 0,
             })
         }
+        Term::Arith { op, left, right } => Some(Operand::Arith {
+            op: *op,
+            left: Box::new(build_operand(left, req, rate)?),
+            right: Box::new(build_operand(right, req, rate)?),
+        }),
         _ => Some(Operand::Term(term.clone())),
     }
 }

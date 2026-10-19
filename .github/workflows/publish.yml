@@ -25,6 +25,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # Full debug info fills the runner's disk before the doctests link.
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
     # Optional approval gate. Needs a `release` environment in repo settings AND
     # the same name in the crates.io config — the environment is part of the OIDC

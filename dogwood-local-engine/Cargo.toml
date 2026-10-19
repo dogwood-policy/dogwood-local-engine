@@ -1,6 +1,6 @@
 [package]
 name = "dogwood-local-engine"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 publish.workspace = true
 description = "An evaluation engine for Dogwood's temporal policies."
@@ -25,11 +25,17 @@ fault-injection = []
 # All-feature check/lint builds are supported, but ordinary tests must not be
 # executed with this feature because Shuttle primitives require a Runner.
 shuttle = ["fault-injection", "dep:shuttle"]
+# EXPERIMENTAL-ARITHMETIC: forwards the frontend's off-by-default arithmetic
+# feature so the arithmetic tests (arithmetic_diff.rs and the agg_memo
+# arithmetic case) can parse their policies. The engine itself has no gate:
+# a default-build frontend rejects arithmetic before it reaches `prepare`,
+# and the evaluator code stays compiled either way.
+experimental-arithmetic = ["dogwood-language/experimental-arithmetic"]
 
 [dependencies]
 # The Dogwood frontend: the `TemporalEngine` seam this crate implements and
 # the temporal-condition AST the evaluator walks.
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0" }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0", version = "1.1" }
 # The durable event log: a pure-Rust embedded ACID key–value store, used only
 # as an append-only log and snapshot slot.
 redb = "4.1.0"
@@ -47,7 +53,7 @@ shuttle = { version = "0.9.3", optional = true }
 [dev-dependencies]
 # Differential testing against the interpreter oracle runs over the embedded
 # regression corpus (feature `corpus` on the frontend).
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "996d756de1013b7ae209a14f566a80375a59f2f0", version = "1.0", features = ["corpus"] }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "e02fb031990db0430b6e79345457d73a690ed9e0", version = "1.1", features = ["corpus"] }
 
 # The corpus differential: LocalTemporalEngine must agree with the in-memory
 # interpreter oracle on every passing case.

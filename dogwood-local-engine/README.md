@@ -22,8 +22,8 @@ To use the engine, add it and the language crate to a project:
 
 ```toml
 [dependencies]
-dogwood-local-engine = "1.0"
-dogwood-language = "1.0"
+dogwood-local-engine = "1.1"
+dogwood-language = "1.1"
 ```
 
 The language crate is needed alongside the engine because it defines the

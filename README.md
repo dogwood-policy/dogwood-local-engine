@@ -17,8 +17,8 @@ To use the engine, add it and the language crate to a project:
 
 ```toml
 [dependencies]
-dogwood-local-engine = "1.0"
-dogwood-language = "1.0"
+dogwood-local-engine = "1.1"
+dogwood-language = "1.1"
 ```
 
 The repository is organized into three crates:

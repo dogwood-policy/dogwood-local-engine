@@ -17,7 +17,10 @@
 //!
 //! - **Durable atomic append**: [`append`](DurableLog::append) commits the new
 //!   record in one redb write transaction with `Durability::Immediate` (fsync
-//!   before returning).
+//!   before returning). A log whose owner opted into deferred syncing commits
+//!   appends with `Durability::None` instead: such an append is atomic and
+//!   visible but **not durable** until the next `flush` or
+//!   other `Immediate` commit; a crash before that loses it.
 //! - **Durable atomic *write set***: [`commit`](DurableLog::commit) puts several
 //!   writes in one such transaction, so facts that must not be seen apart never
 //!   are.
@@ -299,6 +302,12 @@ pub struct DurableLog {
     /// one. Without it, a caller whose snapshot is missing or unusable falls
     /// back to "replay from 0" and reconstructs partial state without noticing.
     base_offset: AtomicU64,
+    /// `true` (the default) commits every [`append`](Self::append) with
+    /// `Durability::Immediate`; `false` commits appends with `Durability::None`
+    /// and leaves the fsync to [`flush`](Self::flush). Only `append` reads it:
+    /// [`commit`](Self::commit), [`prune_below`](Self::prune_below) and open are
+    /// always `Immediate`.
+    sync_appends: bool,
 }
 
 impl DurableLog {
@@ -399,7 +408,39 @@ impl DurableLog {
             faults: None,
             next_offset: AtomicU64::new(next_offset),
             base_offset: AtomicU64::new(base_offset),
+            sync_appends: true,
         })
+    }
+
+    /// Choose whether [`append`](Self::append) fsyncs (`true`, the default) or
+    /// commits with `Durability::None` and relies on a later
+    /// [`flush`](Self::flush) (`false`).
+    ///
+    /// redb 4.4 documents `Durability::None` as: "Commits with this durability
+    /// level will not be persisted to disk unless followed by a commit with
+    /// `Durability::Immediate`." Such a commit writes nothing to storage; its
+    /// pages stay in redb's cache and the new root is recorded only in memory,
+    /// so after any crash — process or power — the database reverts to its last
+    /// `Immediate` commit. Turning syncing back on does not flush; the caller
+    /// flushes if it needs the pending appends durable now.
+    pub(crate) fn set_sync_appends(&mut self, sync: bool) {
+        self.sync_appends = sync;
+    }
+
+    /// Make every record appended so far durable: one empty write transaction
+    /// committed with `Durability::Immediate`.
+    ///
+    /// An empty transaction is enough. A redb write transaction starts from the
+    /// latest root including `Durability::None` commits, and an `Immediate`
+    /// commit writes out and fsyncs that root together with every page the
+    /// non-durable commits before it allocated. On return everything previously
+    /// appended survives a crash.
+    pub(crate) fn flush(&self) -> Result<(), LogError> {
+        let _writer = self.writer.lock().map_err(|_| LogError::WriterPoisoned)?;
+        let mut txn = self.storage_writer.begin(&self.db)?;
+        txn.set_durability(Durability::Immediate)
+            .map_err(|e| LogError::Durability(e.to_string()))?;
+        commit_write(txn)
     }
 
     #[cfg(feature = "fault-injection")]
@@ -444,13 +485,23 @@ impl DurableLog {
     /// `Durability::Immediate` (fsync) so the record survives a crash before
     /// this returns — the atomic transaction boundary.
     ///
+    /// With syncing turned off (`set_sync_appends`),
+    /// commits with `Durability::None` instead: the record is assigned, visible,
+    /// and replayable in this process, but a crash before the next
+    /// `flush` (or any other `Immediate` commit) loses it.
+    ///
     /// The single-write fast path; equivalent to a one-element
     /// [`commit`](Self::commit) without building a slice.
     pub fn append(&self, record: &[u8]) -> Result<u64, LogError> {
         let _writer = self.writer.lock().map_err(|_| LogError::WriterPoisoned)?;
         let offset = self.next_offset.load(Ordering::SeqCst);
         let mut txn = self.storage_writer.begin(&self.db)?;
-        txn.set_durability(Durability::Immediate)
+        let durability = if self.sync_appends {
+            Durability::Immediate
+        } else {
+            Durability::None
+        };
+        txn.set_durability(durability)
             .map_err(|e| LogError::Durability(e.to_string()))?;
         {
             let mut log = txn.open_table(LOG).map_err(LogError::Table)?;
@@ -460,7 +511,8 @@ impl DurableLog {
                 .map_err(LogError::Storage)?;
         }
         // Keep these hooks adjacent to commit: before it neither the record nor
-        // offset is durable; after it both are durable but unpublished in memory.
+        // offset is durable; after it both are committed (durable unless syncing
+        // is off) but unpublished in memory.
         #[cfg(feature = "fault-injection")]
         self.reach(FaultPoint::AppendBeforeCommit);
         commit_write(txn)?;

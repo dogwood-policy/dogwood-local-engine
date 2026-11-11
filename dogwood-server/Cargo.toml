@@ -33,7 +33,7 @@ path = "src/main.rs"
 dogwood-local-engine = { path = "../dogwood-local-engine" }
 # The frontend, for the policy/schema types the control plane installs and the
 # event types the wire API exchanges.
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "4ec5e2c01b44ff3882a231ae5d315b330b38fa25", version = "1.1" }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "ff158506cfd9c7871385ed3a87d7435505fd24b1", version = "1.1" }
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

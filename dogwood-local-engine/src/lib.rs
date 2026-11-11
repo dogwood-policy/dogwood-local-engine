@@ -29,8 +29,8 @@ pub use tick::TickRate;
 // service layered over `DurableLog` + `LocalTemporalEngine`.
 pub use clock::{Clock, WallClock};
 pub use durable::{
-    Applied, BatchResult, DecisionDiagnostics, DecisionResponse, DurableConfig, DurableError,
-    DurableTemporalEngine, Installed, Outcome, PolicyAttribution, Status, Submitted,
+    Applied, BatchResult, DecisionDiagnostics, DecisionResponse, Durability, DurableConfig,
+    DurableError, DurableTemporalEngine, Installed, Outcome, PolicyAttribution, Status, Submitted,
 };
 pub use policy_store::{BatchError, PolicyEntry, PolicyId, PolicySet, PolicyToken, Verb};
 #[doc(hidden)]

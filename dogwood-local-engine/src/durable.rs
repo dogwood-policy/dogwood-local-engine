@@ -459,6 +459,11 @@ impl From<LeafStateTransferError> for DurableError {
 /// deny — even a fail-closed deny carrying evaluation errors — is recorded like
 /// any other. Hoisting it makes "accepted implies positioned" hold by
 /// construction rather than by convention.
+///
+/// Under [`Durability::Periodic`] the offset and timestamp are unique only
+/// among events that reach disk: a crash loses the unsynced tail, and recovery
+/// hands out the same offsets and timestamps again. An audit log that keys on
+/// them must not assume they survive a restart in that mode.
 #[derive(Debug)]
 pub struct Submitted {
     /// The log offset the event was appended at — its position in the total
@@ -604,9 +609,70 @@ pub struct DurableTemporalEngine {
     max_future_skew: Duration,
     /// Encoded log payload read into memory at once during recovery.
     replay_batch_bytes: NonZeroUsize,
+    /// When an event append is fsynced. See [`Durability`].
+    durability: Durability,
+    /// Events appended with `Durability::None` since the last fsync. Zero under
+    /// [`Durability::EveryEvent`].
+    unsynced: u32,
+    /// The timestamp the oldest of the `unsynced` events was stamped with, on
+    /// the store's clock; `None` when `unsynced` is zero.
+    unsynced_since: Option<i64>,
     /// Test-only controller for engine-level acknowledgement and pruning cuts.
     #[cfg(feature = "fault-injection")]
     faults: Option<Arc<FaultInjector>>,
+}
+
+/// When [`submit`](DurableTemporalEngine::submit) makes an event durable. Set
+/// with [`set_durability`](DurableTemporalEngine::set_durability).
+///
+/// [`EveryEvent`](Self::EveryEvent), the default, fsyncs each event before
+/// returning its verdict, so recovery replays every event a caller acted on.
+///
+/// [`Periodic`](Self::Periodic) writes each event but fsyncs only after
+/// `max_events` events, after `max_interval` has passed, and at
+/// [`flush`](DurableTemporalEngine::flush),
+/// [`checkpoint`](DurableTemporalEngine::checkpoint), or clean close. The fsync
+/// is nearly the whole cost of a submit, so this is many times faster. The price:
+/// a crash of any kind, process or power, loses every event after the last
+/// fsync. A verdict already acted on may have rested on one of them, so the
+/// store fails open: a rule such as "no push until tested" forgets the
+/// `cargo add` it saw and allows what it would have denied. Policy installs,
+/// batches and deletes always fsync, and persist the events before them, so
+/// they are never lost.
+///
+/// `max_interval` is measured on the store's clock between the oldest unsynced
+/// event and the one being submitted, not by a timer. An idle store keeps its
+/// last events unsynced until the next submit, `flush`, `checkpoint`, or close;
+/// an embedder that needs a wall-clock bound calls `flush` from its own timer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Durability {
+    /// fsync every event before acknowledging it. Default.
+    #[default]
+    EveryEvent,
+    /// fsync after the `max_events`-th unsynced event (`0` behaves as `1`), or
+    /// at the first submit once `max_interval` has passed since the oldest
+    /// unsynced one. After a crash, the offsets and timestamps of the lost
+    /// events are reused; see [`Submitted`].
+    Periodic {
+        /// Most events acknowledged before an fsync.
+        max_events: u32,
+        /// Longest the oldest unsynced event waits, on the store's clock,
+        /// measured at the next submit.
+        max_interval: Duration,
+    },
+}
+
+impl Drop for DurableTemporalEngine {
+    /// The clean-close flush of [`Durability::Periodic`]. A failure here has no
+    /// caller to report to; call [`flush`](DurableTemporalEngine::flush) before
+    /// dropping to observe it. Skipped while a panic is unwinding, where a second
+    /// panic would abort the process.
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        let _ = self.flush();
+    }
 }
 
 /// The running policy set: the bundle, the authorizer serving decisions, and a
@@ -817,6 +883,9 @@ impl DurableTemporalEngine {
             clock: config.clock,
             max_future_skew: config.max_future_skew,
             replay_batch_bytes,
+            durability: Durability::EveryEvent,
+            unsynced: 0,
+            unsynced_since: None,
             #[cfg(feature = "fault-injection")]
             faults: config.faults,
         };
@@ -1164,7 +1233,9 @@ impl DurableTemporalEngine {
     /// after stepping but before the append, recovery would *lose* an event the
     /// caller may already have acted on, and a future history-gated deny would
     /// wrongly pass. A failed append therefore aborts the whole operation rather
-    /// than proceeding in memory.
+    /// than proceeding in memory. Under [`Durability::Periodic`] the append is
+    /// written but not fsynced, so a crash can still lose an event whose verdict
+    /// was returned — up to the bounds that mode documents.
     ///
     /// The timestamp is assigned **here**, at the append point, never taken from
     /// the caller, and clamped strictly above the previous
@@ -1192,7 +1263,8 @@ impl DurableTemporalEngine {
             .iter()
             .any(|k| k.as_str() == event.kind());
 
-        // 1. Durable append (fsync) — the transaction boundary.
+        // 1. Durable append (fsync, unless the periodic mode defers it) — the
+        //    transaction boundary.
         let offset = self
             .log
             .append(&Record::Event(event.clone()).encode())
@@ -1209,6 +1281,11 @@ impl DurableTemporalEngine {
             .authorizer
             .is_authorized(&event)
             .map(|response| attribute_response(&response, &running.attributions));
+
+        // 2b. The deferred fsync, once a periodic bound is reached. After the
+        //     step, so a failure leaves the log and the monitor agreeing on the
+        //     event; the caller sees the error instead of a verdict.
+        self.note_unsynced_append(ts)?;
 
         // 3. Periodic snapshot (the event-count trigger). Best-effort: a
         //    failed checkpoint costs replay depth, never correctness.
@@ -1253,6 +1330,85 @@ impl DurableTemporalEngine {
             faults.reach(FaultPoint::SubmitBeforeAcknowledge);
         }
         Ok(submitted)
+    }
+
+    /// Choose when events are fsynced; see [`Durability`] for what
+    /// [`Periodic`](Durability::Periodic) gives up.
+    ///
+    /// May be called at any time. Switching to
+    /// [`EveryEvent`](Durability::EveryEvent) first flushes the events still
+    /// unsynced, so on success every event acknowledged so far is durable;
+    /// that flush is the only way this fails, and the mode is switched either
+    /// way (the next event's fsync then persists the earlier ones too).
+    pub fn set_durability(&mut self, durability: Durability) -> Result<(), DurableError> {
+        self.durability = durability;
+        let periodic = matches!(durability, Durability::Periodic { .. });
+        self.log.set_sync_appends(!periodic);
+        if periodic {
+            // A tighter bound applies to the events already pending.
+            let now = self.clock.now_nanos();
+            self.flush_if_due(now)
+        } else {
+            self.flush()
+        }
+    }
+
+    /// The current fsync policy.
+    pub fn durability(&self) -> Durability {
+        self.durability
+    }
+
+    /// fsync now; on return everything acknowledged so far is durable.
+    ///
+    /// A no-op when nothing is pending, which is always the case under
+    /// [`Durability::EveryEvent`].
+    pub fn flush(&mut self) -> Result<(), DurableError> {
+        if self.unsynced == 0 {
+            return Ok(());
+        }
+        self.log
+            .flush()
+            .map_err(|e| DurableError::Log(e.to_string()))?;
+        self.synced();
+        Ok(())
+    }
+
+    /// Count one event, stamped `ts`, appended without an fsync, and flush if a
+    /// bound is hit.
+    fn note_unsynced_append(&mut self, ts: i64) -> Result<(), DurableError> {
+        if self.durability == Durability::EveryEvent {
+            // That append was `Immediate`, persisting anything a failed
+            // switch-over flush left behind.
+            self.synced();
+            return Ok(());
+        }
+        self.unsynced = self.unsynced.saturating_add(1);
+        self.unsynced_since.get_or_insert(ts);
+        self.flush_if_due(ts)
+    }
+
+    /// Flush if the count bound is reached, or the oldest unsynced event is
+    /// `max_interval` or more behind `now` on the store's clock.
+    fn flush_if_due(&mut self, now: i64) -> Result<(), DurableError> {
+        let Durability::Periodic {
+            max_events,
+            max_interval,
+        } = self.durability
+        else {
+            return Ok(());
+        };
+        let interval = i64::try_from(max_interval.as_nanos()).unwrap_or(i64::MAX);
+        let due = self.unsynced >= max_events.max(1)
+            || self
+                .unsynced_since
+                .is_some_and(|since| now.saturating_sub(since) >= interval);
+        if due { self.flush() } else { Ok(()) }
+    }
+
+    /// Record that an `Immediate` commit just made every earlier append durable.
+    fn synced(&mut self) {
+        self.unsynced = 0;
+        self.unsynced_since = None;
     }
 
     /// The timestamp to assign the next event, in epoch **nanoseconds**:
@@ -1497,12 +1653,19 @@ impl DurableTemporalEngine {
     /// validates and only the resulting run of records commits. Each verb is
     /// its own durable record (no `Batch` wrapper), so replay is
     /// grouping-agnostic.
+    ///
+    /// On success every event acknowledged before the batch is durable, under
+    /// either [`Durability`]: a non-empty batch's fsynced commit persists them,
+    /// and an empty batch flushes instead.
     pub fn batch(&mut self, verbs: Vec<Verb>) -> Result<BatchResult, DurableError> {
-        // An empty batch is a no-op: return without rebuilding the authorizer,
-        // writing a record, or advancing the clock. (A degenerate but legal
-        // request — e.g. a client that assembled zero verbs.) It changes nothing,
-        // so it needs no installed set and reports the clock as it stands.
+        // An empty batch changes nothing: no rebuild, no record, no clock
+        // advance. (A degenerate but legal request — e.g. a client that
+        // assembled zero verbs.) It needs no installed set and reports the clock
+        // as it stands. It still keeps the one promise every batch makes, that
+        // the events before it are durable on return; with no commit of its own
+        // to carry them, it flushes.
         if verbs.is_empty() {
+            self.flush()?;
             return Ok(BatchResult {
                 minted: Vec::new(),
                 ts: self.last_ts.unwrap_or(0),
@@ -1619,6 +1782,8 @@ impl DurableTemporalEngine {
         // `ts` claimed by this batch is committed, so advance the shared sequence.
         // A rejected rebuild or a failed commit returned above, claiming nothing.
         self.observed_timestamp(ts);
+        // The commit is `Immediate`, so it also persisted any deferred events.
+        self.synced();
 
         // The last verb's offset/ts is the boundary the batch is *for*: events
         // strictly after it are under the new set. An empty batch (no records)
@@ -1939,6 +2104,8 @@ impl DurableTemporalEngine {
     // ─── Checkpointing ───────────────────────────────────────────────
 
     /// Snapshot the monitor state now and prune the working log below it.
+    /// The snapshot commit is `Immediate`, so it also makes every event deferred
+    /// by [`Durability::Periodic`] durable — the flush a checkpoint promises.
     /// The positional snapshot names its policy bundle, so
     /// recovery restores it only into the identical leaf order. Policy changes
     /// after recovery transplant from that restored live engine.
@@ -1968,6 +2135,7 @@ impl DurableTemporalEngine {
                 payload,
             })])
             .map_err(|e| DurableError::Log(e.to_string()))?;
+        self.synced();
         self.since_snapshot = 0;
 
         // Reclamation, after the snapshot that justifies it is durable.

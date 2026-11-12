@@ -1,6 +1,6 @@
 [package]
 name = "dogwood-local-engine"
-version = "1.1.1"
+version = "1.1.2"
 edition = "2024"
 publish.workspace = true
 description = "An evaluation engine for Dogwood's temporal policies."
@@ -35,7 +35,7 @@ experimental-arithmetic = ["dogwood-language/experimental-arithmetic"]
 [dependencies]
 # The Dogwood frontend: the `TemporalEngine` seam this crate implements and
 # the temporal-condition AST the evaluator walks.
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "4ec5e2c01b44ff3882a231ae5d315b330b38fa25", version = "1.1" }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "ff158506cfd9c7871385ed3a87d7435505fd24b1", version = "1.1" }
 # The durable event log: a pure-Rust embedded ACID key–value store, used only
 # as an append-only log and snapshot slot.
 redb = "4.1.0"
@@ -53,7 +53,7 @@ shuttle = { version = "0.9.3", optional = true }
 [dev-dependencies]
 # Differential testing against the interpreter oracle runs over the embedded
 # regression corpus (feature `corpus` on the frontend).
-dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "4ec5e2c01b44ff3882a231ae5d315b330b38fa25", version = "1.1", features = ["corpus"] }
+dogwood-language = { git = "https://github.com/dogwood-policy/dogwood", rev = "ff158506cfd9c7871385ed3a87d7435505fd24b1", version = "1.1", features = ["corpus"] }
 
 # The corpus differential: LocalTemporalEngine must agree with the in-memory
 # interpreter oracle on every passing case.

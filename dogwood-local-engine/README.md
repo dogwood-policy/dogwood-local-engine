@@ -250,6 +250,145 @@ request behind it sees the whole updated set and none sees a mixture of old
 and new. On recovery the engine replays updates in log order with the events.
 A change that fails to parse, lower, or validate writes nothing.
 
+## Information providers
+
+A policy can call an information provider to get a fact that is not in the
+request, such as whether a piece of text matches a pattern, or what another
+system says about it. The call looks like a function call in a `when` clause.
+The engine computes the answer before each decision. The
+[Dogwood guide](https://dogwood-policy.github.io/dogwood/guide/05-information-providers.html)
+describes the language side.
+
+### Declaring providers
+
+Providers are declared in a JSON document passed to `install_with_providers`.
+Each entry gives the provider's name, its argument types, its output type,
+and usually a script that computes the answer.
+
+```rust
+use dogwood_language::{Event, EventBuilder, Value};
+use dogwood_local_engine::{DurableError, DurableTemporalEngine, Outcome};
+
+const PROVIDERS: &str = r##"{
+  "availableProviders": {
+    "Strings::Matches": {
+      "argumentTypes": [{ "paramType": "string" }, { "paramType": "string" }],
+      "outputType": {
+        "paramType": "record",
+        "fields": { "matched": { "paramType": "bool" } },
+        "required": ["matched"]
+      },
+      "implementation": {
+        "kind": "rhai",
+        "script": "fn evaluate(text, pattern) { if type_of(text) == \"()\" { return #{ matched: false }; } #{ matched: regex_is_match(pattern, text) } }"
+      }
+    }
+  }
+}"##;
+
+const POLICY: &str = r#"
+permit (principal, action == Action::"Read", resource)
+when { Strings::Matches(context.input.document, "^[A-Z]+$").matched == true };
+"#;
+
+const SCHEMA: &str = r#"
+entity User;
+entity Doc;
+action Read appliesTo {
+    principal: User, resource: Doc, context: { input: { document: String } }
+};
+"#;
+
+fn read(document: &str) -> EventBuilder {
+    Event::builder("Action::Read", "request")
+        .principal("User::\"alice\"")
+        .resource("Doc::\"d\"")
+        .field("input", "document", Value::String(document.to_string()))
+        .request_context("input", "document", Value::String(document.to_string()))
+}
+
+# fn main() -> Result<(), DurableError> {
+# let path = std::env::temp_dir().join(format!("dogwood-readme-providers-{}", std::process::id()));
+let mut engine = DurableTemporalEngine::open(&path, 1000)?;
+engine.install_with_providers(POLICY, SCHEMA, None, None, Some(PROVIDERS))?;
+
+let upper = engine.submit(read("ABC"))?;
+let lower = engine.submit(read("abc"))?;
+match (upper.outcome, lower.outcome) {
+    (Outcome::Decision(upper), Outcome::Decision(lower)) => {
+        assert!(upper.allowed());
+        assert!(!lower.allowed());
+    }
+    _ => unreachable!("a request event always gets a verdict"),
+}
+# drop(engine);
+# std::fs::remove_file(&path).ok();
+# Ok(())
+# }
+```
+
+The declarations are part of the store's configuration, like the event schema
+and the macro library. They are saved with the first install and restored when
+the store is reopened. After that they are fixed: a later install with
+different declarations is rejected.
+
+The script text must be in the JSON itself. A script named by file, with
+`"scriptFile"` in place of `"script"`, is rejected at install.
+
+### Answering a provider in your own code
+
+A script runs in a sandbox and cannot reach the network or the file system.
+For a provider whose answer comes from somewhere else, declare it with no
+`implementation` and give the engine a `ProviderResolver`.
+
+```rust,no_run
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use dogwood_language::{ProviderRequest, ProviderResolver, Value};
+use dogwood_local_engine::{DurableError, DurableTemporalEngine};
+
+struct Checks;
+
+impl ProviderResolver for Checks {
+    fn resolve(&self, request: ProviderRequest<'_>) -> Option<Result<Value, String>> {
+        if request.key() != "Remote::Check" {
+            // Not handled here: the provider's own script runs.
+            return None;
+        }
+        let safe = lookup(request.args);
+        Some(Ok(Value::Object(BTreeMap::from([(
+            "safe".to_string(),
+            Value::Bool(safe),
+        )]))))
+    }
+}
+
+/// Your own code: a service call, a database read, a model.
+fn lookup(_args: &[Value]) -> bool {
+    true
+}
+
+# fn main() -> Result<(), DurableError> {
+let mut engine = DurableTemporalEngine::open("store.redb", 1000)?;
+engine.set_provider_resolver(Arc::new(Checks));
+# Ok(())
+# }
+```
+
+A few things to know about the resolver:
+
+- It is not stored. Set it after every `open`. Until it is set, a provider
+  with no implementation has no answer, and decisions are denied with an error
+  in the verdict's diagnostics.
+- It is asked first for every provider call, including providers that have a
+  script. Returning `None` lets the script run. Returning an answer replaces
+  the script.
+- A panic in the resolver is reported as a provider error, so the decision is
+  a deny.
+- Every provider call in the policy set runs on every decision, inside
+  `submit`. A slow resolver delays every caller.
+
 ## What the embedding application must still do
 
 The engine issues verdicts. It does not enforce them, and it cannot check that

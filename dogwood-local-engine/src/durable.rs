@@ -23,13 +23,12 @@
 use std::collections::BTreeSet;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "fault-injection")]
 use std::sync::Arc;
 use std::time::Duration;
 
 use dogwood_language::{
-    Authorizer, DogwoodRuleRef, EventBuilder, ParsedPolicySet, PolicySchema, ServiceSchema,
-    TemporalEngine, Validator,
+    Authorizer, DogwoodRuleRef, EventBuilder, ParsedPolicySet, PolicySchema, ProviderDeclarations,
+    ProviderRequest, ProviderResolver, ServiceSchema, TemporalEngine, Validator, Value,
 };
 
 use crate::clock::{Clock, WallClock};
@@ -41,6 +40,7 @@ use crate::policy_store::{
 use crate::record::{Record, SnapshotPayload};
 use crate::shard::ShardPlan;
 use crate::shared::SharedEngine;
+use crate::sync::Mutex;
 use crate::{DurableLog, LeafStateTransferError, LocalTemporalEngine, Snapshot, TickRate, Write};
 
 mod attribution;
@@ -65,7 +65,7 @@ const META_SERVICE_SCHEMA: &str = "dogwood_server_service_schema";
 /// first [`install`](DurableTemporalEngine::install), and persisted in
 /// [`META_SERVICE_SCHEMA`]; a later `install` that would change it is rejected.
 ///
-/// `None` on either field means "use the built-in default"
+/// `None` on `event_schema` or `macros` means "use the built-in default"
 /// (`DEFAULT_EVENT_SCHEMA` / `DEFAULT_MACROS`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct ServiceConfig {
@@ -73,6 +73,9 @@ struct ServiceConfig {
     event_schema: Option<String>,
     #[serde(default)]
     macros: Option<String>,
+    /// Information-provider declarations JSON, as given; `None` declares none.
+    #[serde(default)]
+    providers: Option<String>,
 }
 
 /// The resolution this server assigns timestamps at, and therefore the unit its
@@ -594,7 +597,7 @@ pub struct DurableTemporalEngine {
     /// once the records are gone, and it is advanced by replay over whatever
     /// records survive.
     last_ts: Option<i64>,
-    /// The store-configuration schema half — event schema + macro library.
+    /// The store-configuration schema half — event schema, macro library, and providers.
     /// Loaded from [`META_SERVICE_SCHEMA`]
     /// at `open` (default = both built-in) and set once by the first `install`;
     /// immutable through the verbs, so a batch never touches it and every
@@ -607,6 +610,9 @@ pub struct DurableTemporalEngine {
     clock: Box<dyn Clock>,
     /// Maximum tolerated distance between durable time and the current clock.
     max_future_skew: Duration,
+    /// Read by every authorizer `rebuild` builds; filled by
+    /// [`set_provider_resolver`](Self::set_provider_resolver), never persisted.
+    provider_resolver: ResolverSlot,
     /// Encoded log payload read into memory at once during recovery.
     replay_batch_bytes: NonZeroUsize,
     /// When an event append is fsynced. See [`Durability`].
@@ -699,6 +705,46 @@ struct Running {
     /// The partition key's field paths, rendered dotted, for `status`. Empty when
     /// the stream is unshardable.
     partition_key: Vec<String>,
+}
+
+type DynResolver = Arc<dyn ProviderResolver + Send + Sync>;
+
+/// The engine's resolver, shared with every authorizer it builds; empty until set.
+#[derive(Clone)]
+struct ResolverSlot(Arc<Mutex<Option<DynResolver>>>);
+
+impl ResolverSlot {
+    fn empty() -> Self {
+        ResolverSlot(Arc::new(Mutex::new(None)))
+    }
+
+    // The slot holds only a handle, so a poisoned lock cannot hide torn state.
+    fn get(&self) -> Option<DynResolver> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set(&self, resolver: DynResolver) {
+        *self.0.lock().unwrap_or_else(|e| e.into_inner()) = Some(resolver);
+    }
+}
+
+impl ProviderResolver for ResolverSlot {
+    fn resolve(&self, request: ProviderRequest<'_>) -> Option<Result<Value, String>> {
+        // `get` releases the lock before the resolver runs.
+        let resolver = self.get()?;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| resolver.resolve(request)))
+            .unwrap_or_else(|payload| {
+                let detail = payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("no panic message");
+                Some(Err(format!(
+                    "provider resolver panicked for {}: {detail}",
+                    request.key()
+                )))
+            })
+    }
 }
 
 /// How to open a [`DurableTemporalEngine`]: the snapshot cadence and the clock.
@@ -882,6 +928,7 @@ impl DurableTemporalEngine {
             service_config,
             clock: config.clock,
             max_future_skew: config.max_future_skew,
+            provider_resolver: ResolverSlot::empty(),
             replay_batch_bytes,
             durability: Durability::EveryEvent,
             unsynced: 0,
@@ -1332,6 +1379,18 @@ impl DurableTemporalEngine {
         Ok(submitted)
     }
 
+    /// Answer information-provider calls in the application's own code.
+    ///
+    /// Every later decision asks `resolver` first, including under the policy
+    /// set already running; `None` from it falls back to the provider's
+    /// declared implementation. Calling again replaces the resolver. It is not
+    /// stored, so a reopened engine has none until this is called again. A
+    /// panic in the resolver is reported as a provider error, so the decision
+    /// is a deny.
+    pub fn set_provider_resolver(&mut self, resolver: Arc<dyn ProviderResolver + Send + Sync>) {
+        self.provider_resolver.set(resolver);
+    }
+
     /// Choose when events are fsynced; see [`Durability`] for what
     /// [`Periodic`](Durability::Periodic) gives up.
     ///
@@ -1538,6 +1597,29 @@ impl DurableTemporalEngine {
         event_schema: Option<&str>,
         macros: Option<&str>,
     ) -> Result<Applied, DurableError> {
+        self.install_with_providers(policy_source, action_schema, event_schema, macros, None)
+    }
+
+    /// [`install`](Self::install), also declaring the store's information providers.
+    ///
+    /// `providers` is the providers JSON text (`availableProviders` /
+    /// `entityTypes`); `None` declares none. It is store configuration under the
+    /// same set-once rule as the event schema and macros. Script text must be
+    /// inline; a provider whose script is named by file (`scriptFile`) is rejected.
+    ///
+    /// # Errors
+    ///
+    /// [`DurableError::Rejected`] when `providers` does not parse or check, or
+    /// when it differs from the providers the store was first installed with;
+    /// otherwise as [`install`](Self::install).
+    pub fn install_with_providers(
+        &mut self,
+        policy_source: &str,
+        action_schema: &str,
+        event_schema: Option<&str>,
+        macros: Option<&str>,
+        providers: Option<&str>,
+    ) -> Result<Applied, DurableError> {
         // Decide the store's service config *without* persisting it: validate the
         // set-once rule and compute the bytes to write, but commit nothing yet.
         // The bytes ride along in the same transaction as the policy records
@@ -1546,7 +1628,8 @@ impl DurableTemporalEngine {
         // locked in by a rejected install, and there is no separate transaction a
         // crash could strand (matches the
         // batch "a rejected change writes nothing" rule).
-        let (desired_config, config_bytes) = self.plan_service_config(event_schema, macros)?;
+        let (desired_config, config_bytes) =
+            self.plan_service_config(event_schema, macros, providers)?;
         // Adopt in memory up front, because `rebuild` lowers the policy against
         // `self.service_config`, and this install's policy must lower against the
         // config being installed. The *durable* write still rides the record
@@ -1596,9 +1679,10 @@ impl DurableTemporalEngine {
         self.apply(installed, now, config_bytes)
     }
 
-    /// Decide the store's service configuration — the event schema and macro
-    /// library — without persisting anything. Returns the config to adopt
-    /// and, on the *first* configuration, the encoded bytes to persist (`None`
+    /// Decide the store's service configuration — the event schema, macro
+    /// library, and information providers — without persisting anything. Returns
+    /// the config to adopt and, on the *first* configuration, the encoded bytes to
+    /// persist (`None`
     /// when a config is already established, so nothing needs writing).
     ///
     /// Set once on the first `install`; a later call that would *change* it is
@@ -1610,10 +1694,12 @@ impl DurableTemporalEngine {
         &self,
         event_schema: Option<&str>,
         macros: Option<&str>,
+        providers: Option<&str>,
     ) -> Result<(ServiceConfig, Option<Vec<u8>>), DurableError> {
         let desired = ServiceConfig {
             event_schema: event_schema.map(str::to_string),
             macros: macros.map(str::to_string),
+            providers: providers.map(str::to_string),
         };
         // Whether a config was ever written: the slot's presence is the flag, so
         // "configured with the defaults" is distinguishable from "never
@@ -1627,9 +1713,9 @@ impl DurableTemporalEngine {
         if already_set {
             if self.service_config != desired {
                 return Err(DurableError::Rejected(
-                    "the event schema and macro library are fixed at store \
-                     configuration and cannot be changed by a later install; \
-                     changing them reborns every policy and requires a fresh store"
+                    "the event schema, macro library, and information providers are \
+                     fixed at store configuration and cannot be changed by a later \
+                     install; changing them reborns every policy and requires a fresh store"
                         .to_string(),
                 ));
             }
@@ -1840,8 +1926,9 @@ impl DurableTemporalEngine {
     }
 
     /// Build the parsing service from the store's fixed [`ServiceConfig`] — the
-    /// event schema and macro library. Each `None` field uses the
-    /// frontend's built-in default (`DEFAULT_EVENT_SCHEMA` / `DEFAULT_MACROS`).
+    /// event schema, macro library, and information providers. A `None` schema or
+    /// macro field uses the frontend's built-in default (`DEFAULT_EVENT_SCHEMA` /
+    /// `DEFAULT_MACROS`); `None` providers declares none.
     fn build_service(config: &ServiceConfig) -> Result<ServiceSchema, DurableError> {
         let mut b = ServiceSchema::builder();
         if let Some(s) = &config.event_schema {
@@ -1849,6 +1936,28 @@ impl DurableTemporalEngine {
         }
         if let Some(m) = &config.macros {
             b = b.macros_str(m);
+        }
+        if let Some(p) = &config.providers {
+            let declarations = ProviderDeclarations::from_json(p)
+                .map_err(|e| DurableError::Rejected(format!("information providers: {e}")))?;
+            // `from_json` leaves a `scriptFile` reference unread, so its script is absent.
+            let unread: Vec<String> = declarations
+                .names()
+                .into_iter()
+                .filter(|name| {
+                    declarations
+                        .get(name)
+                        .and_then(|d| d.implementation.as_ref())
+                        .is_some_and(|i| i.rhai_script().is_none())
+                })
+                .collect();
+            if !unread.is_empty() {
+                return Err(DurableError::Rejected(format!(
+                    "information providers: {} must include the script text inline",
+                    unread.join(", ")
+                )));
+            }
+            b = b.providers(declarations);
         }
         b.build()
             .map_err(|e| DurableError::Rejected(format!("service schema: {e}")))
@@ -1995,6 +2104,7 @@ impl DurableTemporalEngine {
         let shared = SharedEngine::new(engine);
         let authorizer = Authorizer::builder(lowered)
             .temporal_engine(shared.clone())
+            .provider_resolver(self.provider_resolver.clone())
             .build()
             .map_err(|e| DurableError::Rejected(format!("build authorizer: {e}")))?;
 

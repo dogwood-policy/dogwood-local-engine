@@ -4,6 +4,52 @@ Release notes for the Dogwood local authorization engine
 (`dogwood-local-engine`, `dogwood-server`, `dogwood-performance`).
 
 
+## [1.2.0] — 2026-11-23
+
+### Summary
+
+This release lets the durable engine run policies that call information
+providers. Nothing changes for existing callers: `install` keeps its signature,
+and a store that declares no providers behaves as before.
+
+### Added
+
+- **durable**: `DurableTemporalEngine::install_with_providers`. It is `install`
+  with one more argument, the information-provider declarations as JSON text.
+  The declarations are stored with the event schema and macros in the same
+  commit as the first install, so a reopened store rebuilds with them. They
+  follow the same set-once rule: a later install with the same text is
+  accepted, and one that changes or drops them is rejected while the running
+  policy set keeps serving.
+
+  A provider's script must be given inline. A declaration that names its
+  script by file is rejected at install and nothing is stored.
+
+- **durable**: `DurableTemporalEngine::set_provider_resolver`. It gives the
+  engine a `ProviderResolver` that answers provider calls in the application's
+  own code. The resolver is asked first for every provider call; when it
+  declines, the provider's declared script runs. It applies to the policy set
+  already running and to every later policy change, and calling it again
+  replaces it. A panic in the resolver is reported as a provider error, so the
+  decision is a deny and the engine keeps deciding.
+
+  The resolver is not stored. A reopened engine has none until the
+  application sets it again; until then, a provider with no script denies with
+  an error in the diagnostics.
+
+- **docs**: an "Information providers" section in the crate README.
+
+### Compatibility
+
+- **dogwood-language**: unchanged; pairs with dogwood-language 1.1.
+- A store written by an earlier release opens unchanged.
+- The stored configuration gains one optional field. An earlier release that
+  opens a store with declared providers ignores them, so a policy set that
+  calls a provider fails to load there and decisions are refused until a
+  policy set is installed again.
+
+---
+
 ## [1.1.2] — 2026-11-11
 
 ### Summary
